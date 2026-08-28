@@ -1,0 +1,12 @@
+# 题库数据（原始文档、方案、解析结果、成品，不提交）
+data/
+
+# 生成的离线工具（单文件，内嵌全部题库数据，文件名来自 config 的「工具配置」，不提交）
+/*.html
+
+# build_bank.py 生成的成品文件名（测试脚本据此定位，不提交）
+src/debug/_output.json
+
+# Python 缓存
+__pycache__/
+*.pyc

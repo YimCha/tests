@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TOOL_TITLE__</title>
+<style>
+/* ============ 鎏金月夜 · 设计系统 ============ */
+:root{
+  --bg0:#05070e; --bg1:#080d1a; --bg2:#0d1526;
+  --line:rgba(255,255,255,.07); --line2:rgba(226,186,116,.45);
+  --panel:rgba(255,255,255,.03);
+  --gold:#d8a75c; --gold-hi:#f5e3b8; --gold-lo:#9c6f2d;
+  --ink:#edf0f8; --muted:#94a0b8; --faint:#5c6780;
+  --good:#46c793; --bad:#e96874;
+  --a:#d8a75c; --b:#6aa7dd; --c:#5fc3a2;
+  --r:20px;
+  --shadow:0 24px 70px -30px rgba(0,0,0,.85);
+  --f-sans:"HarmonyOS Sans SC","PingFang SC","Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+  --f-serif:"Source Han Serif SC","Noto Serif CJK SC","STZhongsong","SimSun",serif;
+  --f-num:"DIN Alternate","Bahnschrift","Segoe UI",sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+::selection{background:rgba(216,167,92,.32);color:#fff}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:linear-gradient(180deg,#333b55,#232a40);border-radius:99px;border:2px solid var(--bg0)}
+::-webkit-scrollbar-thumb:hover{background:linear-gradient(180deg,#c18f3e,#8a6226)}
+body{
+  font-family:var(--f-sans);
+  background:var(--bg0);
+  color:var(--ink);min-height:100vh;line-height:1.65;
+  -webkit-font-smoothing:antialiased;overflow-x:hidden;
+}
+/* 流动极光 */
+body::before{
+  content:"";position:fixed;inset:-25%;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(46% 34% at 30% 4%, rgba(216,167,92,.15), transparent 62%),
+    radial-gradient(40% 30% at 84% 0%, rgba(106,167,221,.11), transparent 62%),
+    radial-gradient(52% 40% at 72% 98%, rgba(95,195,162,.09), transparent 60%),
+    radial-gradient(38% 32% at 6% 86%, rgba(216,167,92,.07), transparent 62%);
+  animation:aurora 26s ease-in-out infinite alternate;
+}
+@keyframes aurora{
+  0%{transform:translate3d(-2%,-1%,0) scale(1)}
+  50%{transform:translate3d(2%,2%,0) scale(1.05)}
+  100%{transform:translate3d(-1%,3%,0) scale(1.01)}
+}
+/* 星光浮尘 */
+body::after{
+  content:"";position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.55;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='280' height='280'%3E%3Cg fill='%23e4c079'%3E%3Ccircle cx='24' cy='46' r='1.3' opacity='.55'/%3E%3Ccircle cx='96' cy='18' r='1' opacity='.32'/%3E%3Ccircle cx='158' cy='74' r='1.4' opacity='.45'/%3E%3Ccircle cx='230' cy='38' r='1' opacity='.28'/%3E%3Ccircle cx='52' cy='128' r='1.1' opacity='.4'/%3E%3Ccircle cx='132' cy='182' r='1.4' opacity='.5'/%3E%3Ccircle cx='202' cy='146' r='1' opacity='.3'/%3E%3Ccircle cx='248' cy='220' r='1.2' opacity='.42'/%3E%3Ccircle cx='86' cy='252' r='1' opacity='.3'/%3E%3Ccircle cx='176' cy='226' r='1.3' opacity='.45'/%3E%3Ccircle cx='28' cy='208' r='1.1' opacity='.35'/%3E%3C/g%3E%3C/svg%3E");
+  animation:twinkle 9s ease-in-out infinite;
+}
+@keyframes twinkle{0%,100%{opacity:.4}50%{opacity:.7}}
+a{color:inherit;text-decoration:none}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+.num{font-family:var(--f-num);font-variant-numeric:tabular-nums}
+
+/* ============ 布局与卡片 ============ */
+main{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:34px clamp(16px,4vw,42px) 130px}
+main.wide{max-width:1280px}
+.view{display:none}
+.view.active{display:block;animation:rise .55s cubic-bezier(.2,.7,.2,1)}
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+.sec-title{display:flex;align-items:center;gap:13px;margin:10px 0 22px}
+.sec-title .diamond{
+  flex:none;width:11px;height:11px;transform:rotate(45deg);
+  border:1.5px solid var(--gold);border-radius:2px;
+  box-shadow:0 0 10px rgba(216,167,92,.5);
+}
+.sec-title h2{
+  font-family:var(--f-serif);font-size:23px;font-weight:700;letter-spacing:2px;
+  background:linear-gradient(180deg,#f9efd6,#d8a75c 78%);-webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.sec-title small{color:var(--muted);font-size:13px;font-weight:400}
+.sec-title::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,rgba(226,186,116,.32),transparent)}
+.card{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:var(--shadow);backdrop-filter:blur(14px);
+}
+.grid{display:grid;gap:16px}
+.grid.c3{grid-template-columns:repeat(3,1fr)}
+.grid.c2{grid-template-columns:repeat(2,1fr)}
+.grid.c4{grid-template-columns:repeat(4,1fr)}
+
+/* 按钮 */
+.btn{
+  position:relative;display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  padding:11px 22px;border-radius:13px;font-size:14px;font-weight:600;
+  border:1px solid var(--line);color:var(--ink);transition:.22s;user-select:none;overflow:hidden;
+}
+.btn:hover{transform:translateY(-2px)}
+.btn:active{transform:translateY(0) scale(.98)}
+.btn.primary{
+  color:#241708;background:linear-gradient(140deg,#f5e3b8,#c8933f);
+  border-color:transparent;box-shadow:0 10px 26px -10px rgba(216,167,92,.65);
+}
+.btn.primary::after{
+  content:"";position:absolute;inset:0;
+  background:linear-gradient(115deg,transparent 32%,rgba(255,255,255,.5) 50%,transparent 68%);
+  transform:translateX(-130%);transition:transform .7s ease;
+}
+.btn.primary:hover::after{transform:translateX(130%)}
+.btn.primary:hover{box-shadow:0 14px 34px -10px rgba(216,167,92,.8)}
+.btn.ghost:hover{border-color:var(--line2);color:var(--gold-hi);background:rgba(216,167,92,.06)}
+.btn.danger{border-color:rgba(233,104,116,.4);color:var(--bad)}
+.btn.danger:hover{background:rgba(233,104,116,.09)}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important}
+.btn.sm{padding:7px 14px;font-size:13px;border-radius:10px}
+
+/* 岗位卡片 */
+.pos-card{
+  position:relative;padding:24px;overflow:hidden;cursor:pointer;transition:.28s;
+  border:1px solid transparent;
+  background:linear-gradient(#0d1426,#0d1426) padding-box,
+    linear-gradient(150deg,rgba(226,186,116,.42),rgba(255,255,255,.05) 42%,rgba(95,195,162,.22)) border-box;
+}
+.pos-card::before{
+  content:"";position:absolute;left:0;top:0;width:34px;height:1px;background:linear-gradient(90deg,var(--gold),transparent);opacity:0;transition:.3s;
+}
+.pos-card::after{
+  content:"";position:absolute;right:-46px;top:-46px;width:170px;height:170px;
+  background:radial-gradient(circle,rgba(216,167,92,.18),transparent 66%);opacity:0;transition:.3s;
+}
+.pos-card:hover{transform:translateY(-5px);box-shadow:0 28px 64px -28px rgba(216,167,92,.4)}
+.pos-card:hover::before,.pos-card:hover::after{opacity:1}
+.pos-card.on{
+  background:linear-gradient(#131c30,#131c30) padding-box,
+    linear-gradient(150deg,rgba(245,227,184,.95),rgba(216,167,92,.28) 45%,rgba(95,195,162,.5)) border-box;
+  box-shadow:0 22px 60px -24px rgba(216,167,92,.45);
+}
+.pc-head{display:flex;align-items:center;gap:8px}
+.pos-card .pc-name{font-size:19px;font-weight:800;letter-spacing:2px}
+.pos-card .pc-num{margin-left:auto;font-family:var(--f-num);font-size:24px;font-weight:800;color:var(--gold-hi);font-variant-numeric:tabular-nums;text-shadow:0 0 24px rgba(216,167,92,.35)}
+.pos-card .pc-num small{font-size:12px;color:var(--muted);font-family:var(--f-sans);margin-left:2px}
+.bar3{display:flex;height:7px;border-radius:99px;overflow:hidden;margin-top:16px;gap:3px}
+.bar3 i{border-radius:99px}
+.bar3 .ba{background:linear-gradient(90deg,#9c6f2d,#f5e3b8)}
+.bar3 .bb{background:linear-gradient(90deg,#2f6ea8,#86c0ef)}
+.bar3 .bc{background:linear-gradient(90deg,#2f8f70,#8adfc0)}
+.pc-stats{display:flex;gap:6px;margin-top:12px}
+.pc-stats span{flex:1;display:flex;align-items:center;justify-content:center;gap:5px;font-size:12px;color:var(--muted);background:var(--panel);border:1px solid var(--line);border-radius:9px;padding:5px 4px}
+.pc-stats i{width:8px;height:8px;border-radius:3px;display:inline-block}
+.pc-stats b{font-family:var(--f-num);font-size:13px;color:var(--ink);font-variant-numeric:tabular-nums}
+.pc-stats em{font-style:normal;font-size:11px;color:var(--muted)}
+.pc-check{width:20px;height:20px;border-radius:50%;border:1px solid var(--line2);display:none;place-items:center;font-size:11px;color:#241708;flex:none}
+.pos-card.on .pc-check{display:grid;background:linear-gradient(140deg,#f5e3b8,#c8933f);box-shadow:0 4px 14px -3px rgba(216,167,92,.6)}
+
+/* 题目卡 */
+.q-card{padding:26px;position:relative}
+.q-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+.badge{padding:3px 11px;border-radius:7px;font-size:12px;font-weight:600;letter-spacing:.5px}
+.badge.single{color:#f5e3b8;background:rgba(216,167,92,.14);border:1px solid rgba(216,167,92,.32)}
+.badge.multi{color:#a5cdf0;background:rgba(106,167,221,.14);border:1px solid rgba(106,167,221,.34)}
+.badge.judge{color:#9fe0c4;background:rgba(95,195,162,.13);border:1px solid rgba(95,195,162,.34)}
+.badge.chap{color:var(--muted);font-weight:400;font-size:11px;letter-spacing:.5px}
+.q-prog{margin-left:auto;font-size:12px;color:var(--muted)}
+.q-stem{font-size:17px;line-height:1.8;margin-bottom:22px;font-weight:500;letter-spacing:.2px}
+.opts{display:grid;gap:12px}
+.opt{
+  position:relative;display:flex;align-items:flex-start;gap:14px;padding:15px 46px 15px 18px;border-radius:15px;
+  border:1px solid var(--line);background:rgba(255,255,255,.025);cursor:pointer;transition:.22s;
+}
+.opt:hover{border-color:var(--line2);background:rgba(216,167,92,.05);transform:translateX(3px)}
+.opt .key{
+  flex:none;width:30px;height:30px;border-radius:9px;display:grid;place-items:center;
+  font-family:var(--f-num);font-weight:700;font-size:14px;
+  border:1px solid var(--line);color:var(--muted);transition:.22s;
+}
+.opt .txt{flex:1;font-size:15px;line-height:1.65;padding-top:3px}
+.opt .tick{
+  position:absolute;right:15px;top:50%;transform:translateY(-50%) scale(0);
+  width:22px;height:22px;border-radius:50%;display:grid;place-items:center;
+  font-size:12px;font-weight:800;color:#0a140d;background:var(--good);
+  box-shadow:0 4px 12px -3px rgba(70,199,147,.6);transition:.22s;
+}
+.opt.sel{border-color:var(--gold);background:rgba(216,167,92,.1);transform:translateX(3px)}
+.opt.sel .key{background:linear-gradient(140deg,#f5e3b8,#c8933f);color:#241708;border-color:transparent;box-shadow:0 4px 12px -3px rgba(216,167,92,.5)}
+.opt.sel .tick{background:linear-gradient(140deg,#f5e3b8,#c8933f);color:#241708;box-shadow:0 4px 12px -3px rgba(216,167,92,.55);transform:translateY(-50%) scale(1)}
+.opt.right{border-color:var(--good);background:rgba(70,199,147,.09);animation:pop .35s}
+.opt.right .key{background:var(--good);color:#06110b;border-color:transparent}
+.opt.right .tick{transform:translateY(-50%) scale(1)}
+.opt.wrong{border-color:var(--bad);background:rgba(233,104,116,.09);animation:pop .35s}
+.opt.wrong .key{background:var(--bad);color:#200608;border-color:transparent}
+.opt.wrong .tick{background:var(--bad);color:#fff;transform:translateY(-50%) scale(1)}
+.opt.lock{cursor:default}
+.opt.lock:hover{transform:none;border-color:var(--line);background:rgba(255,255,255,.025)}
+@keyframes pop{0%{transform:scale(.97)}55%{transform:scale(1.015)}100%{transform:scale(1)}}
+
+.q-foot{display:flex;gap:12px;margin-top:22px;flex-wrap:wrap;align-items:center}
+.q-foot-spacer{flex:1}
+
+.bar-row{display:flex;align-items:center;gap:12px;margin:12px 0}
+.bar-row .b-name{flex:none;width:78px;font-size:13px;color:var(--muted);text-align:right}
+.bar-row .b-track{flex:1;height:10px;border-radius:99px;background:rgba(255,255,255,.05);overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.4)}
+.bar-row .b-track i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#9c6f2d,#f5e3b8);width:0;transition:width .9s ease}
+.bar-row .b-val{flex:none;width:64px;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.panel-title{font-size:14px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.panel-title::before{content:"";width:4px;height:16px;border-radius:3px;background:linear-gradient(#f5e3b8,#9c6f2d);box-shadow:0 0 8px rgba(216,167,92,.5)}
+
+/* 模拟考 */
+.exam-setup{max-width:640px;margin:0 auto;text-align:center;padding:36px 30px!important;position:relative;overflow:hidden}
+.exam-setup .seal-ring{width:64px;height:64px;margin:0 auto 16px;border-radius:50%;display:grid;place-items:center;font-size:26px;font-family:var(--f-serif);border:1px solid rgba(226,186,116,.4);background:radial-gradient(circle,rgba(216,167,92,.18),transparent 70%);color:var(--gold);box-shadow:0 0 30px -6px rgba(216,167,92,.45)}
+.exam-setup .es-title{font-family:var(--f-serif);font-size:21px;font-weight:700;letter-spacing:2px;color:var(--gold-hi)}
+.exam-setup .es-info{font-size:13px;color:var(--muted);line-height:1.9;margin:12px 0 22px}
+.exam-nav{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}
+.exam-timer{font-size:15px;color:var(--gold-hi);font-weight:800;letter-spacing:1px;font-family:var(--f-num);white-space:nowrap}
+.exam-timer.warn{color:var(--bad);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
+.result-hero{text-align:center;padding:44px 20px;position:relative;overflow:hidden}
+.result-hero::before{content:"";position:absolute;inset:0;background:radial-gradient(60% 80% at 50% -20%,rgba(216,167,92,.14),transparent 60%)}
+.result-hero .score{font-family:var(--f-num);font-size:78px;font-weight:800;color:var(--gold-hi);line-height:1;font-variant-numeric:tabular-nums;text-shadow:0 0 40px rgba(216,167,92,.4)}
+.result-hero .score small{font-size:20px;color:var(--muted);font-family:var(--f-sans)}
+.result-hero .verdict{font-size:16px;margin-top:14px;color:var(--muted)}
+.ring{position:relative;width:120px;height:120px;margin:0 auto 18px}
+.ring svg{transform:rotate(-90deg)}
+.ring .ring-v{position:absolute;inset:0;display:grid;place-items:center;font-size:26px;font-weight:800;font-family:var(--f-num)}
+
+/* 模拟考 · 重构 */
+.exam-setup{max-width:820px}
+.es-notice{margin:14px 0 4px;padding:11px 14px;border-radius:12px;font-size:12.5px;line-height:1.75;text-align:left;color:var(--gold-hi);background:rgba(216,167,92,.08);border:1px solid rgba(226,186,116,.28)}
+.es-sec{margin:20px 0 10px;text-align:left;font-size:12px;color:var(--faint);letter-spacing:2px;display:flex;align-items:center;gap:10px}
+.es-sec::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,rgba(226,186,116,.25),transparent)}
+.ratio-panel{display:grid;gap:10px;text-align:left}
+.rp-row{display:flex;align-items:center;gap:12px}
+.rp-cat{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:11px;background:rgba(255,255,255,.035);border:1px solid var(--line)}
+.rp-cat .rp-sub{font-size:12px;color:var(--ink);font-weight:700}
+.rp-subrow{margin-left:26px}
+.rp-tag{flex:none;width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-weight:800;font-size:13px;color:#0a1420;background:var(--c);box-shadow:0 4px 12px -3px var(--c)}
+.rp-main{flex:1;min-width:0}
+.rp-bar{height:9px;border-radius:99px;background:rgba(255,255,255,.06);overflow:hidden}
+.rp-bar i{display:block;height:100%;border-radius:99px;transition:width .8s ease}
+.rp-sub{margin-top:6px;font-size:11.5px;color:var(--muted);line-height:1.6}
+.rp-pt{flex:none;font-size:18px;font-weight:800;color:var(--gold-hi);min-width:52px;text-align:right}
+.rp-pt small{font-size:11px;color:var(--muted);font-weight:400;margin-left:2px}
+.type-panel{display:grid;gap:9px;text-align:left;background:rgba(255,255,255,.02);border:1px dashed rgba(226,186,116,.28);border-radius:13px;padding:14px 15px}
+.tp-row{display:flex;align-items:center;gap:10px}
+.tp-name{flex:1;font-size:13.5px;color:var(--ink)}
+.tp-btn{width:30px;height:30px;border-radius:9px;border:1px solid var(--line);font-size:16px;color:var(--gold-hi);transition:.15s;display:grid;place-items:center}
+.tp-btn:hover{border-color:var(--line2);background:rgba(216,167,92,.08)}
+.tp-num{width:54px;height:30px;border-radius:9px;border:1px solid var(--line);background:rgba(255,255,255,.03);color:var(--ink);text-align:center;font-size:14px;font-weight:700;font-family:var(--f-num)}
+.tp-num:focus{outline:none;border-color:var(--gold)}
+.tp-num::-webkit-inner-spin-button,.tp-num::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+.tp-total{margin-top:4px;font-size:12px;color:var(--muted);text-align:right}
+.tp-total b{color:var(--gold-hi);font-size:14px}
+.tp-unit{font-size:12px;color:var(--muted)}
+.es-actions{display:flex;gap:12px;justify-content:center;margin-top:22px;flex-wrap:wrap;position:sticky;bottom:0;padding:14px 0 2px;background:linear-gradient(180deg,transparent,var(--bg1) 42%)}
+.info-card{margin:16px 0 4px;padding:16px 18px;border-radius:14px;background:linear-gradient(180deg,rgba(216,167,92,.1),rgba(255,255,255,.02));border:1px solid rgba(226,186,116,.35);text-align:left}
+.ic-head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.ic-name{font-family:var(--f-serif);font-size:19px;font-weight:700;color:var(--gold-hi)}
+.ic-total{margin-left:auto;font-size:13px;color:var(--muted)}
+.ic-total b{color:var(--gold-hi);font-family:var(--f-num);font-size:15px}
+.ic-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+.ic-cell{display:flex;align-items:baseline;gap:6px;padding:10px 12px;border-radius:11px;background:rgba(255,255,255,.03);border:1px solid var(--line)}
+.ic-cell span{font-size:11.5px;color:var(--faint)}
+.ic-cell b{font-size:14px;color:var(--gold-hi);font-family:var(--f-num)}
+.setup-toggle{margin:18px 0 0;padding:13px 15px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.02);display:flex;align-items:center;gap:10px;cursor:pointer;transition:.15s;text-align:left}
+.setup-toggle:hover{border-color:var(--line2);background:rgba(216,167,92,.06)}
+.setup-toggle .st-t{font-size:14px;font-weight:700;color:var(--ink)}
+.setup-toggle .st-sub{font-size:11.5px;color:var(--faint)}
+.setup-toggle .st-arrow{margin-left:auto;color:var(--gold);font-size:13px}
+.setup-panel{margin-top:14px;padding:4px 2px 2px}
+.exam-pos{font-size:13px;color:var(--muted);white-space:nowrap}
+.exam-done{font-size:12.5px;color:var(--muted)}
+.exam-done b{color:var(--gold-hi);font-family:var(--f-num)}
+.exam-statcard{margin-top:16px}
+.exam-topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:10px 0;background:linear-gradient(180deg,var(--bg0) 78%,transparent)}
+.et-info{margin-left:auto;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.exam-navcard{padding:16px 18px;margin-top:16px}
+.exam-legend{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:4px;font-size:11.5px;color:var(--muted)}
+.exam-legend span{display:flex;align-items:center;gap:6px}
+.exam-legend i{width:12px;height:12px;border-radius:4px;display:inline-block}
+.exam-legend .lg-done{background:rgba(95,195,162,.4);box-shadow:inset 0 0 0 1px rgba(95,195,162,.6)}
+.exam-legend .lg-cur{background:rgba(216,167,92,.25);box-shadow:inset 0 0 0 1px var(--gold)}
+.exam-legend .lg-mark{background:transparent;box-shadow:inset 0 0 0 1px rgba(233,104,116,.5);position:relative}
+.exam-legend .lg-mark::after{content:"▴";position:absolute;top:-3px;right:-2px;font-size:8px;color:var(--bad)}
+.exam-nav button{position:relative;width:52px;height:44px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;border-radius:10px;border:1px solid var(--line);font-size:13px;color:var(--muted);transition:.15s;font-family:var(--f-num)}
+.exam-nav button .tt{font-size:9px;font-weight:800;line-height:1;color:var(--c);opacity:.95;font-family:var(--f-sans)}
+.exam-nav button b{font-size:13px;line-height:1}
+.exam-nav button:hover{border-color:var(--line2);color:var(--gold-hi)}
+.exam-nav button.on{border-color:var(--gold);color:var(--gold-hi);background:rgba(216,167,92,.14);box-shadow:0 0 12px -3px rgba(216,167,92,.5)}
+.exam-nav button.done{background:rgba(95,195,162,.16);border-color:rgba(95,195,162,.4)}
+.exam-nav button.done b{color:#9fe0c4}
+.exam-nav button.mark::after{content:"▴";position:absolute;top:2px;right:4px;font-size:8px;color:var(--bad)}
+.rv-panel{padding:22px}
+.rv-meta-row{display:flex;gap:14px;justify-content:center;margin-top:12px;font-size:12.5px;color:var(--muted);flex-wrap:wrap}
+.review-row{display:flex;align-items:center;gap:14px;padding:14px 18px;border-bottom:1px solid var(--line);font-size:14px;cursor:pointer;transition:.2s;flex-wrap:wrap}
+.review-row:hover{background:rgba(216,167,92,.04)}
+.review-row .rv-ic{flex:none;width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:13px;font-weight:800}
+.review-row.ok .rv-ic{background:rgba(70,199,147,.14);color:var(--good)}
+.review-row.no .rv-ic{background:rgba(233,104,116,.14);color:var(--bad)}
+.review-row .rv-n{flex:none;width:26px;color:var(--faint)}
+.review-row .rv-chap{flex:none;font-size:11px;color:var(--muted);background:rgba(255,255,255,.05);padding:2px 8px;border-radius:6px}
+.review-row .rv-stem{flex:1;min-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink)}
+.review-row .rv-meta{flex:none;font-size:12px;color:var(--muted);min-width:44px;text-align:right}
+.review-row .rv-detail{display:none;width:100%;flex-basis:100%;padding:18px;border-top:1px dashed var(--line);background:rgba(255,255,255,.02);margin-top:10px}
+.review-row.open .rv-detail{display:block;animation:rise .35s}
+.rv-stem-full{font-size:15.5px;line-height:1.8;font-weight:500;margin-bottom:16px}
+.rv-opts{display:grid;gap:8px}
+.rv-opt{display:flex;align-items:flex-start;gap:10px;padding:9px 14px;border-radius:11px;border:1px solid var(--line);font-size:13.5px;line-height:1.6}
+.rv-opt .key{flex:none;width:22px;height:22px;border-radius:7px;display:grid;place-items:center;font-size:12px;font-weight:700;font-family:var(--f-num);border:1px solid var(--line);color:var(--muted)}
+.rv-opt.r{border-color:rgba(70,199,147,.45);background:rgba(70,199,147,.09)}
+.rv-opt.r .key{background:var(--good);color:#06110b;border-color:transparent}
+.rv-opt.w{border-color:rgba(233,104,116,.45);background:rgba(233,104,116,.09)}
+.rv-opt.w .key{background:var(--bad);color:#200608;border-color:transparent}
+.rv-answer{margin-top:14px;font-size:13px;color:var(--muted)}
+.rv-answer b{color:var(--ink);font-weight:700}
+.rv-answer .okc{color:var(--good)}
+.rv-note{margin-top:10px;padding:11px 14px;border-radius:11px;background:rgba(216,167,92,.07);border:1px solid rgba(226,186,116,.22);font-size:13px;color:var(--ink);line-height:1.75;white-space:pre-wrap}
+
+/* 页脚 */
+footer{position:relative;z-index:1;text-align:center;color:var(--faint);font-size:12px;padding:6px 0 24px;letter-spacing:1.5px}
+footer div{margin:2px 0}
+
+@media (max-width:760px){
+  .grid.c3,.grid.c2,.grid.c4{grid-template-columns:1fr}
+  .q-stem{font-size:15.5px}
+}
+</style>
+</head>
+<body>
+
+<main id="app"></main>
+
+<footer>
+  <div>__FOOTER_1__</div>
+  <div>__FOOTER_2__</div>
+</footer>
+
+<script>
+const BANK = __BANK_DATA__;
+</script>
+<script>
+/* ================= 状态 ================= */
+const KEY = 'srbank_v1';
+const TYPES = ['单选题','多选题','判断题'];
+const TYPE_SHORT = ['单选','多选','判断'];
+let st = load();
+let pools = buildPools();
+let view = 'home';
+
+function load(){
+  try{ const d = JSON.parse(localStorage.getItem(KEY));
+    return Object.assign({pos:0, types:[40,25,15], rule:null, dur:60}, d);
+  }catch(e){ return {pos:0, types:[40,25,15], rule:null, dur:60}; }
+}
+function save(){ localStorage.setItem(KEY, JSON.stringify(st)); }
+
+/* ================= 数据：岗位 -> 题库池 ================= */
+function buildPools(){
+  return BANK.positions.map((_,pi)=>{
+    const A=[],B=[],C=[];
+    BANK.q.forEach((q,qi)=>{
+      if(!q.p.includes(pi)) return;
+      const ch = BANK.chapters[q.ch];
+      if(ch.endsWith('A类')) A.push(qi);
+      else if(ch.endsWith('B类')) B.push(qi);
+      else C.push(qi);
+    });
+    return {A,B,C, all:[...A,...B,...C]};
+  });
+}
+function poolFor(pi){ return pools[pi]; }
+function qAt(i){ return BANK.q[i]; }
+function shuffle(a){ a=[...a]; for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];} return a; }
+
+/* ================= 渲染骨架 ================= */
+const app = document.getElementById('app');
+app.addEventListener('click', e=>{
+  const el = e.target.closest ? e.target.closest('.opt') : null;
+  if(el) onOptClick(el);
+});
+function go(v){ view=v; render(); window.scrollTo({top:0}); }
+
+function render(){
+  let html='';
+  if(view==='home') html = vHome();
+  else if(view==='exam') html = vExam();
+  app.innerHTML = html;
+  app.classList.toggle('wide', view==='exam' && !exam);
+  if(view==='exam' && exam) drawExam();
+  bindGlobal();
+}
+function setPos(i){ st.pos=i; st.rule=null; save(); go('exam'); }
+
+/* ================= 首页 ================= */
+function vHome(){
+  const cards = BANK.positions.map((p,i)=>{
+    const pool = poolFor(i);
+    const cls = {A:pool.A.length, B:pool.B.length, C:pool.C.length};
+    const tot = cls.A+cls.B+cls.C;
+    const w = {A:cls.A/tot*100, B:cls.B/tot*100, C:cls.C/tot*100};
+    return `
+    <div class="card pos-card ${i===st.pos?'on':''}" onclick="setPos(${i})">
+      <div class="pc-head">
+        <div class="pc-check">✓</div>
+        <div class="pc-name">${p.name}</div>
+        <div class="pc-num">${tot}<small>题</small></div>
+      </div>
+      <div class="bar3">
+        <i class="ba" style="width:${w.A}%"></i>
+        <i class="bb" style="width:${w.B}%"></i>
+        <i class="bc" style="width:${w.C}%"></i>
+      </div>
+      <div class="pc-stats">
+        <span><i style="background:var(--a)"></i>A类 <b>${cls.A}</b><em>题</em></span>
+        <span><i style="background:var(--b)"></i>B类 <b>${cls.B}</b><em>题</em></span>
+        <span><i style="background:var(--c)"></i>C类 <b>${cls.C}</b><em>题</em></span>
+      </div>
+    </div>`;
+  }).join('');
+  return `
+  <div class="sec-title"><span class="diamond"></span><h2>请选择考试岗位</h2></div>
+  <div class="grid c3">${cards}</div>`;
+}
+
+/* ================= 答题交互 ================= */
+function onOptClick(el){
+  const qi = +el.dataset.qi;
+  if(view==='exam' && exam && !exam.done) toggleExamSelect(qi, el);
+}
+function bindGlobal(){
+  requestAnimationFrame(()=>{
+    document.querySelectorAll('.bar-row i[data-w]').forEach(el=>{ el.style.width=el.dataset.w+'%'; });
+  });
+}
+
+/* ================= 模拟考试 ================= */
+const OUTER_NOTE = '正式考试满分 100 分＝题库内 80 分＋题库外 20 分。题库外题目本工具无法练习，此处仅模拟题库内 80 分。';
+const CLS_INFO = {A:'#d8a75c', B:'#6aa7dd', C:'#5fc3a2'};
+let exam = null;
+let examLoopId = 0;
+
+function clsOf(qi){ const ch = BANK.chapters[qAt(qi).ch]; return ch.endsWith('A类')?'A':(ch.endsWith('B类')?'B':'C'); }
+function deptOf(qi){ const ch = BANK.chapters[qAt(qi).ch]; return ch.slice(0,-2); }
+
+// 每题 1 分：按分值抽题即按题数抽题（池内随机抽）
+function pickPoints(qids, pts){ return shuffle(qids).slice(0, pts); }
+// 把 total 按 weights 比例拆成整数，四舍五入并保证合计=total
+function splitByWeight(total, weights){
+  const sum = weights.reduce((a,b)=>a+b,0);
+  const raw = weights.map(w=>total*w/sum);
+  const res = raw.map(Math.floor);
+  let left = total - res.reduce((a,b)=>a+b,0);
+  const order = raw.map((v,i)=>({i, f:v-res[i]})).sort((a,b)=>b.f-a.f);
+  for(let k=0; left>0; k++){ res[order[k%order.length].i]++; left--; }
+  return res;
+}
+// 生成 [题型×抽题单元] 目标矩阵：每题型合计=types，每单元合计=其方案题数
+function genMatrix(types, unitTargets){
+  const total = types.reduce((a,b)=>a+b,0);
+  const M = types.map(()=>unitTargets.map(()=>0));
+  const cells = [];
+  types.forEach((_,t)=>unitTargets.forEach((_,c)=>{
+    const e = types[t]*unitTargets[c]/total;
+    M[t][c] = Math.floor(e);
+    cells.push({t, c, f:e-Math.floor(e)});
+  }));
+  const rowLeft = types.map((n,t)=>n-M[t].reduce((a,b)=>a+b,0));
+  const colLeft = unitTargets.map((n,c)=>n-types.reduce((a,_,t)=>a+M[t][c],0));
+  let left = rowLeft.reduce((a,b)=>a+b,0);
+  cells.sort((a,b)=>b.f-a.f);
+  for(let k=0; left>0; k++){
+    const cell = cells[k%cells.length];
+    if(rowLeft[cell.t]>0 && colLeft[cell.c]>0){ M[cell.t][cell.c]++; rowLeft[cell.t]--; colLeft[cell.c]--; left--; }
+  }
+  return M;
+}
+// 从单元池抽指定题型 n 题；该题型不足时用同单元其他题型补足，保证单元题数=目标
+function pickTyped(pool, type, n){
+  const typed = pool.filter(qi=>qAt(qi).t===type);
+  const other = pool.filter(qi=>qAt(qi).t!==type);
+  const r = pickPoints(typed, n);
+  if(r.length<n) r.push(...pickPoints(other, n-r.length));
+  return r;
+}
+function genPaper(pi, types, rule){
+  const pos = BANK.positions[pi], pool = poolFor(pi);
+  const units = [{pool:pool.A, target:rule.A}];
+  pos.b.forEach((g,i)=>units.push({pool:pool.B.filter(qi=>g[0].includes(deptOf(qi))), target:rule.B[i]}));
+  pos.c.forEach((g,i)=>units.push({pool:pool.C.filter(qi=>g[0].includes(deptOf(qi))), target:rule.C[i]}));
+  const M = genMatrix(types, units.map(u=>u.target));
+  const paper = [];
+  types.forEach((_,t)=>units.forEach((u,c)=>{
+    paper.push(...pickTyped(u.pool, t, M[t][c]));
+  }));
+  return paper.sort((x,y)=>qAt(x).t - qAt(y).t);
+}
+function readTypes(){ return [0,1,2].map(i=>Math.max(0, Math.round(+document.getElementById('tp'+i).value)||0)); }
+function syncType(){
+  const t = readTypes(), el = document.getElementById('tpTotal');
+  if(el) el.textContent = t.reduce((a,b)=>a+b,0);
+  updateInfoCard();
+}
+function adjustType(i,d){
+  const el = document.getElementById('tp'+i);
+  const v = (+el.value||0)+d;
+  if(v<0) return;
+  el.value = v; syncType();
+}
+function adjustRule(id,d){
+  const el = document.getElementById(id);
+  const v = (+el.value||0)+d;
+  if(v<0) return;
+  el.value = v; syncRule();
+}
+function readRule(){
+  const pos = BANK.positions[st.pos];
+  return {
+    A: Math.max(0, Math.round(+document.getElementById('ruleA').value)||0),
+    B: pos.b.map((_,i)=>Math.max(0, Math.round(+document.getElementById('ruleB'+i).value)||0)),
+    C: pos.c.map((_,i)=>Math.max(0, Math.round(+document.getElementById('ruleC'+i).value)||0)),
+  };
+}
+function syncRule(){
+  const pos = BANK.positions[st.pos];
+  const ids = ['ruleA', ...pos.b.map((_,i)=>'ruleB'+i), ...pos.c.map((_,i)=>'ruleC'+i)];
+  const vals = ids.map(id=>Math.max(0, Math.round(+document.getElementById(id).value)||0));
+  const t = vals.reduce((a,b)=>a+b,0);
+  const el = document.getElementById('ruleTotal');
+  if(el) el.textContent = t;
+  updateInfoCard();
+}
+function adjustDur(d){
+  const el = document.getElementById('durInput');
+  const v = (+el.value||0)+d;
+  if(v<1) return;
+  el.value = v; syncDur();
+}
+function syncDur(){
+  const el = document.getElementById('durInput');
+  st.dur = Math.max(1, Math.round(+el.value)||1);
+  save();
+  updateInfoCard();
+}
+function startExam(){
+  const types = readTypes();
+  const total = types.reduce((a,b)=>a+b,0);
+  if(total!==80){ alert(`题型题量合计需为 80 题（当前 ${total}）`); return; }
+  const rule = readRule();
+  const rtotal = rule.A + rule.B.reduce((a,b)=>a+b,0) + rule.C.reduce((a,b)=>a+b,0);
+  if(rtotal!==80){ alert(`抽取规则合计需为 80 题（当前 ${rtotal}）`); return; }
+  st.types = types; st.rule = rule; syncDur(); save();
+  exam={paper:genPaper(st.pos, types, rule), rule, cur:0, ans:{}, mark:{}, start:Date.now(), dur:st.dur*60, done:false};
+  go('exam');
+  examTimerLoop();
+}
+function vExam(){
+  if(!exam) return vExamSetup();
+  if(exam.done) return vExamResult();
+  return vExamRun();
+}
+function grpText(g){ return g[0].length>1 ? g[0].join(' + ') : g[0][0]; }
+function vExamSetup(){
+  const pos = BANK.positions[st.pos];
+  const rule = st.rule || {A:pos.ratio[0], B:pos.b.map(g=>g[1]), C:pos.c.map(g=>g[1])};
+  const rA = rule.A, rB = rule.B.reduce((a,b)=>a+b,0), rC = rule.C.reduce((a,b)=>a+b,0);
+  const ruleRows = [
+    {id:'ruleA', tag:'A', sub:'所有部门 A 类题合集', val:rule.A},
+    ...pos.b.map((g,i)=>({id:'ruleB'+i, tag:'B', sub:grpText(g), val:rule.B[i]})),
+    ...pos.c.map((g,i)=>({id:'ruleC'+i, tag:'C', sub:grpText(g), val:rule.C[i]})),
+  ].map(r=>`
+    <div class="tp-row">
+      <span class="rp-tag" style="--c:${CLS_INFO[r.tag]}">${r.tag}</span>
+      <span class="tp-name">${r.sub}</span>
+      <button class="tp-btn" onclick="adjustRule('${r.id}',-1)">−</button>
+      <input class="tp-num num" id="${r.id}" type="number" value="${r.val}" min="0" oninput="syncRule()">
+      <button class="tp-btn" onclick="adjustRule('${r.id}',1)">+</button>
+    </div>`).join('');
+  const tpRows = TYPES.map((n,t)=>`
+    <div class="tp-row">
+      <span class="tp-name">${n}</span>
+      <button class="tp-btn" onclick="adjustType(${t},-1)">−</button>
+      <input class="tp-num num" id="tp${t}" type="number" value="${st.types[t]}" min="0" oninput="syncType()">
+      <button class="tp-btn" onclick="adjustType(${t},1)">+</button>
+    </div>`).join('');
+  return `
+  <div class="exam-setup card">
+    <div class="seal-ring" style="margin:0 auto 6px">卷</div>
+    <div class="es-title">模拟考试 · ${pos.name}</div>
+    <div class="es-notice">${OUTER_NOTE}</div>
+    <div class="info-card">
+      <div class="ic-head">
+        <span class="ic-name">${pos.name}</span>
+        <span class="ic-total">共 <b id="icTotal" class="num">${rA+rB+rC}</b> 题 · 满分 <b class="num">80</b> 分</span>
+      </div>
+      <div class="ic-grid">
+        <div class="ic-cell"><span>限时</span><b id="icDur" class="num">${st.dur}</b> 分钟</div>
+        <div class="ic-cell"><span>题型</span><b id="icTypes" class="num">${st.types.map((n,t)=>TYPE_SHORT[t]+n).join(' · ')}</b></div>
+        <div class="ic-cell"><span>分值</span><b id="icRule" class="num">A类${rA}题 · B类${rB}题 · C类${rC}题</b></div>
+      </div>
+    </div>
+    <div class="setup-toggle" onclick="toggleSetup()">
+      <span class="st-t">自定义设置</span>
+      <span class="st-sub">默认按《实施方案》，可调整</span>
+      <span class="st-arrow" id="stArrow">▾</span>
+    </div>
+    <div id="setupPanel" class="setup-panel" style="display:none">
+      <div class="es-sec">抽取规则</div>
+      <div class="type-panel">
+        ${ruleRows}
+        <div class="tp-total">合计 <b id="ruleTotal" class="num">${rA+rB+rC}</b> 题</div>
+      </div>
+      <div class="es-sec">题型题量</div>
+      <div class="type-panel">
+        ${tpRows}
+        <div class="tp-total">合计 <b id="tpTotal" class="num">${st.types.reduce((a,b)=>a+b,0)}</b> 题</div>
+      </div>
+      <div class="es-sec">考试时长</div>
+      <div class="type-panel">
+        <div class="tp-row">
+          <span class="tp-name">限时答题</span>
+          <button class="tp-btn" onclick="adjustDur(-1)">−</button>
+          <input class="tp-num num" id="durInput" type="number" value="${st.dur}" min="1" oninput="syncDur()">
+          <button class="tp-btn" onclick="adjustDur(1)">+</button>
+          <span class="tp-unit">分钟</span>
+        </div>
+      </div>
+    </div>
+    <div class="es-actions">
+      <button class="btn ghost" onclick="go('home')">重新选择岗位</button>
+      <button class="btn primary" onclick="startExam()">开始考试</button>
+    </div>
+  </div>`;
+}
+function toggleSetup(){
+  const p = document.getElementById('setupPanel');
+  const on = p.style.display!=='none';
+  p.style.display = on?'none':'block';
+  const a = document.getElementById('stArrow');
+  if(a) a.textContent = on?'▸':'▾';
+}
+function updateInfoCard(){
+  const pos = BANK.positions[st.pos];
+  const rule = st.rule || {A:pos.ratio[0], B:pos.b.map(g=>g[1]), C:pos.c.map(g=>g[1])};
+  const rA=rule.A, rB=rule.B.reduce((a,b)=>a+b,0), rC=rule.C.reduce((a,b)=>a+b,0);
+  const el = document.getElementById('icTotal'); if(el) el.textContent = rA+rB+rC;
+  const ed = document.getElementById('icDur'); if(ed) ed.textContent = st.dur;
+  const et = document.getElementById('icTypes'); if(et) et.textContent = st.types.map((n,t)=>TYPE_SHORT[t]+n).join(' · ');
+  const er = document.getElementById('icRule'); if(er) er.textContent = `A类${rA}题 · B类${rB}题 · C类${rC}题`;
+}
+function vExamRun(){
+  return `
+  <div class="exam-topbar">
+    <button class="btn ghost" onclick="exitExam()">← 返回岗位选择</button>
+    <div class="et-info">
+      <span class="exam-timer" id="examTimer">00:00:00</span>
+      <span class="exam-pos">第 <b class="num">1</b> / 80 题</span>
+      <span class="exam-done">已答 <b class="num">0</b> · 未答 <b class="num">80</b> · 标记 <b class="num">0</b></span>
+    </div>
+  </div>
+  <div id="examBox"></div>
+  <div class="card exam-navcard">
+    <div class="exam-legend">
+      <span><i class="lg-done"></i>已答</span>
+      <span><i class="lg-cur"></i>当前</span>
+      <span><i class="lg-mark"></i>标记</span>
+    </div>
+    <div class="exam-nav" id="examNav"></div>
+  </div>
+  <div class="card exam-statcard" id="examStat"></div>`;
+}
+function exitExam(){
+  if(!confirm('退出后本次答题进度将丢失，确定返回岗位选择？')) return;
+  examLoopId++;
+  exam = null;
+  go('home');
+}
+function drawExam(){
+  if(!exam || exam.done) return;
+  const qi = exam.paper[exam.cur], q = qAt(qi);
+  document.getElementById('examBox').innerHTML = qCard(qi,{n:exam.cur+1,total:exam.paper.length,instant:false,lock:false,
+    sel:exam.ans[qi]||[], chapName:BANK.chapters[q.ch], exam:true});
+  document.getElementById('examNav').innerHTML = exam.paper.map((qj,i)=>navBtn(i)).join('');
+  updateExamHead(); syncTimer(); drawStatCard();
+  bindGlobal();
+}
+function statCardHTML(){
+  const pos = BANK.positions[st.pos];
+  const rule = exam.rule;
+  const total = exam.paper.length;
+  const bTarget = rule.B.reduce((a,b)=>a+b,0);
+  const cTarget = rule.C.reduce((a,b)=>a+b,0);
+  const aCnt = exam.paper.filter(qi=>clsOf(qi)==='A').length;
+  const bGroups = pos.b.map((g,i)=>({sub:grpText(g), target:rule.B[i],
+    cnt:exam.paper.filter(qi=>clsOf(qi)==='B'&&g[0].includes(deptOf(qi))).length}));
+  const bCnt = bGroups.reduce((a,b)=>a+b.cnt,0);
+  const cGroups = pos.c.map((g,i)=>({sub:grpText(g), target:rule.C[i],
+    cnt:exam.paper.filter(qi=>clsOf(qi)==='C'&&g[0].includes(deptOf(qi))).length}));
+  const cCnt = cGroups.reduce((a,b)=>a+b.cnt,0);
+  const bar = (cnt, cls) => `<div class="rp-bar"><i style="width:${total?(cnt/total*100).toFixed(1):0}%;background:${CLS_INFO[cls]}"></i></div>`;
+  const catRow = (cls, name, cnt, target) => `
+    <div class="rp-cat">
+      <span class="rp-tag" style="--c:${CLS_INFO[cls]}">${cls}类</span>
+      <div class="rp-main">${bar(cnt,cls)}<div class="rp-sub">${name}</div></div>
+      <span class="rp-pt num">${cnt}<small> 题 / 要求 ${target} 题</small></span>
+    </div>`;
+  const grpRow = (cls, sub, cnt, target) => `
+    <div class="rp-row rp-subrow">
+      <span class="rp-tag" style="--c:${CLS_INFO[cls]}">${cls}</span>
+      <div class="rp-main">${bar(cnt,cls)}<div class="rp-sub">${sub}</div></div>
+      <span class="rp-pt num">${cnt}<small> 题 / 要求 ${target} 题</small></span>
+    </div>`;
+  const rows = [
+    catRow('A', '所有部门合集', aCnt, rule.A),
+    catRow('B', 'B类合计', bCnt, bTarget),
+    ...bGroups.map(g=>grpRow('B', g.sub, g.cnt, g.target)),
+    catRow('C', 'C类合计', cCnt, cTarget),
+    ...cGroups.map(g=>grpRow('C', g.sub, g.cnt, g.target)),
+  ].join('');
+  return `
+  <div class="es-sec">本次实际抽取（共 ${total} 题）</div>
+  <div class="ratio-panel">${rows}</div>`;
+}
+function drawStatCard(){
+  const el = document.getElementById('examStat');
+  if(el && exam && !exam.done) el.innerHTML = statCardHTML();
+}
+function syncTimer(){
+  const el = document.getElementById('examTimer');
+  if(el && exam && !exam.done){
+    const left = exam.dur - Math.floor((Date.now()-exam.start)/1000);
+    el.textContent = fmtTime(Math.max(0,left));
+    el.classList.toggle('warn', left<=300);
+  }
+}
+const TYPE_COLORS=['#d8a75c','#6aa7dd','#5fc3a2'];
+function navBtn(i){
+  const qi = exam.paper[i], t = qAt(qi).t;
+  const stt=[];
+  if(i===exam.cur) stt.push('on');
+  if(exam.ans[qi] && exam.ans[qi].length) stt.push('done');
+  if(exam.mark[qi]) stt.push('mark');
+  return `<button class="${stt.join(' ')}" onclick="jumpExam(${i})">
+    <i class="tt" style="--c:${TYPE_COLORS[t]}">${TYPES[t]}</i><b>${i+1}</b></button>`;
+}
+function updateExamHead(){
+  const el=document.querySelector('.exam-done');
+  if(!el || !exam) return;
+  const answered = Object.keys(exam.ans).filter(k=>exam.ans[k]&&exam.ans[k].length).length;
+  const marked = Object.keys(exam.mark).length;
+  el.innerHTML = `已答 <b class="num">${answered}</b> · 未答 <b class="num">${exam.paper.length-answered}</b> · 标记 <b class="num">${marked}</b>`;
+  const pos = document.querySelector('.exam-pos');
+  if(pos && exam) pos.innerHTML = `第 <b class="num">${exam.cur+1}</b> / ${exam.paper.length} 题`;
+}
+function toggleExamSelect(qi, el){
+  const q = qAt(qi);
+  const card = el.closest('.q-card');
+  if(q.t===1){
+    el.classList.toggle('sel');
+  } else {
+    if(el.classList.contains('sel')) el.classList.remove('sel');
+    else { card.querySelectorAll('.opt').forEach(o=>o.classList.remove('sel')); el.classList.add('sel'); }
+  }
+  const sel = q.t===1 ? [...card.querySelectorAll('.opt.sel')].map(o=>o.dataset.key)
+    : [card.querySelector('.opt.sel')?.dataset.key].filter(Boolean);
+  if(sel.length) exam.ans[qi]=sel; else delete exam.ans[qi];
+  updateExamHead(); drawExamNav();
+}
+function drawExamNav(){
+  const nav=document.getElementById('examNav');
+  if(nav && exam && !exam.done) nav.innerHTML = exam.paper.map((qj,i)=>navBtn(i)).join('');
+}
+function jumpExam(i){ if(!exam||exam.done) return; exam.cur=i; drawExam(); }
+function prevExam(){ if(!exam||exam.done) return; if(exam.cur>0){ exam.cur--; drawExam(); } }
+function nextExam(){ if(!exam||exam.done) return; if(exam.cur<exam.paper.length-1){ exam.cur++; drawExam(); } }
+function toggleMark(){
+  if(!exam||exam.done) return;
+  const qi = exam.paper[exam.cur];
+  if(exam.mark[qi]) delete exam.mark[qi]; else exam.mark[qi]=1;
+  drawExam(); updateExamHead();
+}
+function judgeOK(q, ua){
+  if(q.t===1) return ua.length>0 && [...ua].sort().join('')===[...q.a].sort().join('');
+  if(q.t===0) return ua.length===1 && ua[0]===q.a;
+  return ua.length===1 && ((ua[0]==='对')===(q.a==='对'));
+}
+function submitExam(){
+  if(!exam || exam.done) return;
+  const answered = Object.keys(exam.ans).filter(k=>exam.ans[k]&&exam.ans[k].length).length;
+  const marked = Object.keys(exam.mark).length;
+  const un = exam.paper.length - answered;
+  if(!confirm(`已答 ${answered} 题 · 未答 ${un} 题${marked?` · 标记 ${marked} 题`:''}\n确定交卷？`)) return;
+  let score=0;
+  const stt={A:{g:0,f:0},B:{g:0,f:0},C:{g:0,f:0}}, tst={0:{g:0,f:0},1:{g:0,f:0},2:{g:0,f:0}};
+  exam.paper.forEach(qi=>{
+    const q=qAt(qi), ua=exam.ans[qi]||[], cls=clsOf(qi);
+    stt[cls].f++; tst[q.t].f++;
+    if(judgeOK(q,ua)){
+      score++; stt[cls].g++; tst[q.t].g++;
+    }
+  });
+  save();
+  exam.score=score; exam.done=true; exam.tst=tst; exam.stt=stt;
+  exam.used = Math.round((Date.now()-exam.start)/1000);
+  examLoopId++;
+  render();
+}
+function fmtTime(sec){
+  const h=Math.floor(sec/3600), m=Math.floor(sec%3600/60), s=sec%60;
+  return [h,m,s].map(x=>String(x).padStart(2,'0')).join(':');
+}
+function examTimerLoop(){
+  const myId = ++examLoopId;
+  (function tick(){
+    if(!exam || exam.done || examLoopId!==myId) return;
+    const left = exam.dur - Math.floor((Date.now()-exam.start)/1000);
+    if(left<=0){
+      const el=document.getElementById('examTimer');
+      if(el) el.textContent='00:00:00';
+      submitExam(); return;
+    }
+    const el=document.getElementById('examTimer');
+    if(el){ el.textContent=fmtTime(left); el.classList.toggle('warn', left<=300); }
+    setTimeout(tick,1000);
+  })();
+}
+function reviewDetail(qi){
+  const q=qAt(qi), ua=exam.ans[qi]||[], letters=['A','B','C','D','E','F','G','H'];
+  const right=[...q.a];
+  let opts;
+  if(q.t===2){
+    opts=['对','错'].map(v=>{
+      const stt = right.includes(v)?'r':(ua.includes(v)?'w':'');
+      return `<div class="rv-opt ${stt}"><span class="key">${v==='对'?'✓':'✕'}</span>${v}</div>`;
+    }).join('');
+  } else {
+    opts=q.o.map((txt,idx)=>{
+      const L=letters[idx];
+      const stt=right.includes(L)?'r':(ua.includes(L)?'w':'');
+      return `<div class="rv-opt ${stt}"><span class="key">${L}</span>${esc(txt)}</div>`;
+    }).join('');
+  }
+  const rightStr = q.t===2 ? (q.a==='对'?'对':'错') : right.join('、');
+  return `<div class="rv-inner">
+    <div class="rv-stem-full">${esc(q.s)}</div>
+    <div class="rv-opts">${opts}</div>
+    <div class="rv-answer">你的答案：<b>${ua.join('')||'未作答'}</b>　·　正确答案：<b class="okc">${rightStr}</b></div>
+    ${q.n?`<div class="rv-note">解析：${esc(q.n)}</div>`:''}
+  </div>`;
+}
+function toggleReview(i){
+  const el=document.getElementById('rv-'+i);
+  if(el) el.closest('.review-row').classList.toggle('open');
+}
+function vExamResult(){
+  const full=exam.paper.length, s=exam.score, pct=Math.round(s/full*100);
+  const verdict = pct>=90?'卓越':pct>=80?'优秀':pct>=70?'良好':pct>=60?'合格':'待加强';
+  const typeRows=['单选题','多选题','判断题'].map((name,t)=>{
+    const d=exam.tst[t];
+    return `<div class="bar-row"><span class="b-name">${name}</span>
+      <div class="b-track"><i data-w="${d.f?d.g/d.f*100:0}"></i></div>
+      <span class="b-val num">${d.g}/${d.f} 分</span></div>`;
+  }).join('');
+  const catRows=['A','B','C'].map(c=>{
+    const d=exam.stt[c];
+    return `<div class="bar-row"><span class="b-name" style="color:${CLS_INFO[c]}">${c} 类</span>
+      <div class="b-track"><i data-w="${d.f?d.g/d.f*100:0}" style="background:${CLS_INFO[c]}"></i></div>
+      <span class="b-val num">${d.g}/${d.f} 分</span></div>`;
+  }).join('');
+  const rows = exam.paper.map((qi,i)=>{
+    const q=qAt(qi), ua=exam.ans[qi]||[], ok=judgeOK(q,ua);
+    return `<div class="review-row ${ok?'ok':'no'}" onclick="toggleReview(${i})">
+      <span class="rv-ic">${ok?'✓':'✕'}</span>
+      <span class="rv-n num">${i+1}</span>
+      <span class="rv-chap">${BANK.chapters[q.ch]}</span>
+      <span class="rv-stem">${esc(q.s)}</span>
+      <span class="rv-meta num">${ua.join('')||'未答'}</span>
+      <div class="rv-detail" id="rv-${i}">${reviewDetail(qi)}</div>
+    </div>`;
+  }).join('');
+  return `
+  <div class="card result-hero">
+    <div class="ring">
+      <svg width="120" height="120">
+        <defs><linearGradient id="rg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="#f5e3b8"/><stop offset="100%" stop-color="#b8863a"/>
+        </linearGradient></defs>
+        <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="9"/>
+        <circle cx="60" cy="60" r="52" fill="none" stroke="url(#rg)" stroke-width="9" stroke-linecap="round"
+          stroke-dasharray="${2*Math.PI*52}" stroke-dashoffset="${2*Math.PI*52*(1-pct/100)}" style="transition:stroke-dashoffset 1.2s ease"/>
+      </svg>
+      <div class="ring-v num">${pct}%</div>
+    </div>
+    <div class="score">${s}<small> / ${full} 分</small></div>
+    <div class="verdict">${verdict}</div>
+    <div class="rv-meta-row">
+      <span>用时 ${fmtTime(exam.used)}</span><span>共 ${exam.paper.length} 题</span>
+      <span>${BANK.positions[st.pos].name}</span>
+    </div>
+    <div class="es-actions" style="margin-top:16px">
+      <button class="btn primary" onclick="exam=null;go('exam')">再来一次</button>
+      <button class="btn ghost" onclick="go('home')">返回首页</button>
+    </div>
+  </div>
+  <div class="grid c2" style="margin-top:16px">
+    <div class="card rv-panel"><div class="panel-title">分题型得分</div>${typeRows}</div>
+    <div class="card rv-panel"><div class="panel-title">分 A/B/C 得分</div>${catRows}</div>
+  </div>
+  <div class="sec-title"><span class="diamond"></span><h2>答题详情</h2><small>点击行可展开查看解析</small></div>
+  <div class="card" style="padding:6px 0">${rows}</div>`;
+}
+
+
+/* ================= 题目卡渲染 ================= */
+function qCard(qi, o){
+  const q=qAt(qi);
+  const letters=['A','B','C','D','E','F','G','H'];
+  let opts;
+  if(q.t===2){
+    opts=['对','错'].map((v,i)=>`
+      <div class="opt ${o.sel.includes(v)?'sel':''}" data-qi="${qi}" data-key="${v}">
+        <span class="key">${v==='对'?'✓':'✕'}</span><span class="txt">${v}</span><span class="tick">✓</span></div>`).join('');
+  } else {
+    opts=q.o.map((txt,i)=>`
+      <div class="opt ${o.sel.includes(letters[i])?'sel':''}" data-qi="${qi}" data-key="${letters[i]}">
+        <span class="key">${letters[i]}</span><span class="txt">${esc(txt)}</span><span class="tick">✓</span></div>`).join('');
+  }
+  const badge = q.t===0?'single':(q.t===1?'multi':'judge');
+  const chap = o.chapName? `<span class="badge chap">${o.chapName}</span>`:'';
+  const marked = o.exam && exam && exam.mark[qi]? `<span class="badge" style="color:var(--bad);border:1px solid rgba(233,104,116,.4);background:rgba(233,104,116,.1)">已标记</span>`:'';
+  const isLast = o.exam && exam && exam.cur>=exam.paper.length-1;
+  const examFoot = o.exam && exam ? `
+    <div class="q-foot">
+      <button class="btn ghost" onclick="prevExam()">上一题</button>
+      <button class="btn ${exam.mark[qi]?'primary':'ghost'}" onclick="toggleMark()">${exam.mark[qi]?'已标记':'标记'}</button>
+      <span class="q-foot-spacer"></span>
+      <button class="btn ${isLast?'primary':'ghost'}" onclick="submitExam()">交卷</button>
+      ${isLast?'':`<button class="btn primary" onclick="nextExam()">下一题</button>`}
+    </div>`:'';
+  return `
+  <div class="card q-card" data-qi="${qi}" data-locked="${o.lock?'1':'0'}">
+    <div class="q-head">
+      <span class="badge ${badge}">${TYPES[q.t]}</span>
+      ${chap}
+      ${marked}
+      ${o.extra||''}
+      <span class="q-prog num">${o.n} / ${o.total}</span>
+    </div>
+    <div class="q-stem">${esc(q.s)}</div>
+    <div class="opts">${opts}</div>
+    ${examFoot}
+  </div>`;
+}
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+render();
+if(view==='exam' && exam) examTimerLoop();
+</script>
+</body>
+</html>
