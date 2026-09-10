@@ -10,6 +10,7 @@ const fakeEl = () => {
   const cls = new Set();
   return {
     _h:'', innerHTML:'', className:'', dataset:{}, style:{}, _ls:{}, _cls:cls,
+    textContent:'{}', outerHTML:'<html></html>',
     classList:{ add:c=>cls.add(c), remove:c=>cls.delete(c),
       toggle:c=>cls.has(c)?(cls.delete(c),false):(cls.add(c),true),
       contains:c=>cls.has(c) },
@@ -26,14 +27,19 @@ global.document = {
   querySelector(){ return fakeEl(); },
   querySelectorAll(){ return []; },
 };
+// documentElement.outerHTML 动态反映 #bankRec 记录区内容（模拟真实 DOM 序列化）
+const docEl = fakeEl();
+Object.defineProperty(docEl, 'outerHTML', { get(){ return `<html><body>${document.getElementById('bankRec').textContent}</body></html>`; } });
+document.documentElement = docEl;
 global.localStorage = { getItem(k){ return store[k]||null; }, setItem(k,v){ store[k]=String(v); }, removeItem(k){ delete store[k]; } };
 global.confirm = () => true;
+global.alert = () => {};
 global.navigator = {};
-global.window = { scrollTo(){} };
+global.window = { scrollTo(){}, addEventListener(){} };
 global.requestAnimationFrame = cb => cb();
 global.cancelAnimationFrame = () => {};
 
-eval(script + '\n;globalThis.__h={bank:()=>BANK, exam:()=>exam, st:()=>st, view:()=>view, setExam:v=>{exam=v;}, pw:()=>pw, resetPw:()=>{pw={};}, practice:()=>practice};');
+eval(script + '\n;globalThis.__h={bank:()=>BANK, exam:()=>exam, st:()=>st, view:()=>view, setExam:v=>{exam=v;}, pw:()=>pw, resetPw:()=>{pw={};}, practice:()=>practice, fileId:()=>FILE_ID, setPending:v=>{recPending=v;}, getPending:()=>recPending, recHandle:()=>recHandle, setHandle:v=>{recHandle=v;}, snap:()=>recSnap};');
 
 let fails = 0;
 const ok = (cond,msg)=>{ console.log(`  [${cond?'PASS':'FAIL'}] ${msg}`); if(!cond) fails++; };
@@ -280,5 +286,56 @@ ok(__h.pw()[0][qa2].mastered===false && __h.pw()[0][qa2].fails===1 && __h.pw()[0
 __h.resetPw();
 const stC = __h.st(); stC.porder=undefined; save();
 
+// 14) 记录可序列化回文件（跟随文件走）
+__h.resetPw();
+recordWrong(0, qa2, false); recordWrong(0, qa2, false);
+const recHtml = recHTML();
+ok(recHtml.indexOf('"fails":2')>=0, 'recHTML 产物包含最新记录（可写回文件本体）');
+ok(document.getElementById('bankRec').textContent.indexOf('fails')>=0, '文件内嵌记录区已更新');
+ok(recHtml.startsWith('<!DOCTYPE html>'), '写回产物保持完整 HTML 结构');
+
+// 15) 清空全部记录
+recordWrong(0, qa2, false);
+clearRec();
+ok(!__h.pw()[0] && Object.keys(__h.pw()).length===0, '清空记录后全部岗位记录清零');
+ok(localStorage.getItem('srbank_practice_v1')==='{}', '清空后备份同步为空');
+
+// 16) 自动保存句柄身份校验（防复制副本/换版本误写旧文件）
+const fid = __h.fileId();
+ok(fid && fid.length>=16, '文件构建指纹已注入');
+ok(recMetaOK({id:fid, name:'模拟考试工具.html'}, '模拟考试工具.html'), '同文件（指纹+文件名一致）校验通过');
+ok(!recMetaOK({id:fid, name:'模拟考试工具 - 副本.html'}, '模拟考试工具.html'), '文件名不一致（复制副本）校验拒绝');
+ok(!recMetaOK({id:'deadbeef', name:'模拟考试工具.html'}, '模拟考试工具.html'), '构建指纹不一致（换版本）校验拒绝');
+ok(!recMetaOK(null, '模拟考试工具.html'), '无元数据（旧版本）校验拒绝');
+
+// 17) 待恢复/已开启状态提示（已开启不含「立即保存」，待恢复含恢复入口）
+__h.setPending({name:'模拟考试工具.html'});
+const pendBar = recBarHTML();
+ok(pendBar.includes('恢复自动保存') && pendBar.includes('重新选择文件'), '待恢复态含「恢复自动保存」与「重新选择文件」');
+__h.setPending(null);
+__h.setHandle({name:'模拟考试工具.html'});
+const onBar = recBarHTML();
+ok(onBar.includes('自动保存已开启') && !onBar.includes('立即保存'), '已开启态显示自动保存状态、不再显示「立即保存」');
+__h.setHandle(null);
+__h.setPending(null);
+
+// 18) 恢复自动保存前的记录一致性检查（防复制副本误写旧文件）
+(async()=>{
+const mkHandle = rec => ({kind:'file', name:'模拟考试工具.html',
+  getFile: async ()=>({ text: async ()=>`<html><script id="bankRec" type="application/json">${rec}</script></html>` }),
+  queryPermission: async ()=>'granted', requestPermission: async ()=>'granted'});
+__h.setHandle(null);
+// 记录不一致 -> 拦截，引导重新选择（不恢复）
+__h.setPending(mkHandle('{"0":{"q":{"fails":9}}}'));
+await resumeRecSave();
+ok(!__h.recHandle(), '记录不一致时拒绝恢复（拦截误写旧文件）');
+ok(!__h.pw()[0], '拦截后不产生错误记录');
+// 记录一致 -> 正常恢复（recSnap 为页面打开时的记录快照，桩初始为 '{}'）
+__h.setPending(mkHandle('{}'));
+await resumeRecSave();
+ok(__h.recHandle() && __h.recHandle().kind==='file', '记录一致时正常恢复自动保存');
+__h.setHandle(null); __h.setPending(null);
+
 console.log(fails? `\n存在 ${fails} 个 FAIL`:'\n全部 PASS');
 process.exit(fails?1:0);
+})();

@@ -2,7 +2,7 @@
 """从 master_bank.xlsx（经 bank_loader）注入 template.html，输出单文件离线刷题工具。
 输出文件名与标题/页脚等元数据均来自 config.xlsx 的「工具配置」sheet，代码不含业务信息。
 母题库或配置更新后重跑本脚本即可。"""
-import json, os
+import json, os, uuid
 from collections import Counter
 from bank_loader import load_bank
 
@@ -25,9 +25,11 @@ def main():
 
     tpl = open(TPL, encoding='utf-8').read()
     assert '__BANK_DATA__' in tpl, 'template 缺少 __BANK_DATA__ 占位符'
-    for key in ('__TOOL_TITLE__', '__FOOTER_1__', '__FOOTER_2__'):
+    for key in ('__TOOL_TITLE__', '__FOOTER_1__', '__FOOTER_2__', '__RECORD_DATA__', '__FILE_ID__'):
         assert key in tpl, f'template 缺少 {key} 占位符'
     html = tpl.replace('__BANK_DATA__', data_json)
+    html = html.replace('__RECORD_DATA__', '{}')  # 空刷题记录，运行期经授权写回本文件
+    html = html.replace('__FILE_ID__', uuid.uuid4().hex)  # 构建指纹，供自动保存句柄身份校验
     html = html.replace('__TOOL_TITLE__', meta.get('工具标题') or '')
     html = html.replace('__FOOTER_1__', meta.get('页脚第一行') or '')
     html = html.replace('__FOOTER_2__', meta.get('页脚第二行') or '')

@@ -7,15 +7,188 @@ let st = load();
 let pools = buildPools();
 let view = 'home';
 
-/* 错题本存储（独立 key，与模拟考设置互不影响；localStorage 持久化，同浏览器重开保留） */
+/* 错题本存储：记录跟随本文件（#bankRec），localStorage 仅作实时冗余备份。
+   数据存在 HTML 文件本体里：复制/移动文件即带走记录，不同文件天然独立。
+   写回文件经 File System Access API 授权（每次打开一次），授权后当次会话自动保存。 */
 const PKEY = 'srbank_practice_v1';
 const MASTER_STREAK = 3;   // 连续答对 N 次视为掌握
 const HIGH_FAILS = 2;      // 高频错题阈值（错误次数 >= 此值）
-let pw = pLoad();
-function pLoad(){
-  try{ const d = JSON.parse(localStorage.getItem(PKEY)); return (d && typeof d==='object') ? d : {}; }catch(e){ return {}; }
+let recSnap = '';          // 当前文件打开时的记录快照，用于恢复时识别副本
+let pw = recInit();
+let recHandle = null;      // FileSystemFileHandle，用于写回本文件（已授权）
+let recPending = null;     // 已保存的句柄，待恢复授权（无需再选文件）
+let recDirty = false;      // 有未写回的变更
+let recTimer = 0;          // 防抖定时器
+
+function recInit(){
+  let d = {};
+  try{ const el = document.getElementById('bankRec');
+    if(el && el.textContent){
+      recSnap = el.textContent.trim();
+      d = JSON.parse(recSnap) || {};
+    } }catch(e){ d = {}; }
+  // 旧版本数据迁移：文件内记录为空时取 localStorage 备份
+  if(!Object.keys(d).length){
+    try{ const ls = JSON.parse(localStorage.getItem(PKEY)); if(ls && typeof ls==='object') d = ls; }catch(e){}
+  }
+  return d;
 }
-function pSave(){ localStorage.setItem(PKEY, JSON.stringify(pw)); }
+function pSave(){
+  localStorage.setItem(PKEY, JSON.stringify(pw));   // 冗余备份
+  if(!recDirty){ recDirty = true; clearTimeout(recTimer);
+    recTimer = setTimeout(()=>{ recDirty = false; saveRecToFile(); }, 800); }
+  updateRecBar();
+}
+
+/* ---- 写回本文件（File System Access API，Chromium 专属） ---- */
+function recDB(){ return new Promise((res, rej)=>{
+  const req = indexedDB.open('srbank_rec_v1', 1);
+  req.onupgradeneeded = ()=> req.result.createObjectStore('kv');
+  req.onsuccess = ()=> res(req.result);
+  req.onerror = ()=> rej(req.error);
+});}
+function recDBGet(db, key){ return new Promise((res, rej)=>{
+  const t = db.transaction('kv','readonly').objectStore('kv').get(key);
+  t.onsuccess = ()=> res(t.result); t.onerror = ()=> rej(t.error);
+});}
+function recDBPut(db, key, val){ return new Promise((res, rej)=>{
+  const t = db.transaction('kv','readwrite').objectStore('kv').put(val, key);
+  t.onsuccess = ()=> res(); t.onerror = ()=> rej(t.error);
+});}
+/* 校验句柄是否属于当前文件：构建指纹一致 + 文件名一致（防复制副本/换版本误写旧文件） */
+function recMetaOK(meta, name){
+  if(!meta) return false;
+  if(typeof FILE_ID === 'undefined' || meta.id !== FILE_ID) return false;
+  if(meta.name && name && meta.name !== name) return false;
+  return true;
+}
+function recFileName(){ try{ return decodeURIComponent(location.pathname.split('/').pop() || ''); }catch(e){ return ''; } }
+async function recRestore(){
+  // 打开时找回上次授权的句柄：校验属于当前文件且权限有效则直接开启；否则回退首次开启流程
+  try{
+    const db = await recDB();
+    const [h, meta] = await Promise.all([recDBGet(db, 'handle'), recDBGet(db, 'meta')]);
+    if(h && h.kind==='file' && recMetaOK(meta, recFileName())){
+      if(await h.queryPermission({mode:'readwrite'}) === 'granted'){ recHandle = h; }
+      else recPending = h;
+      updateRecBar();
+      return;
+    }
+    // 句柄属于其他文件/版本，清除避免误用
+    try{ await recDBPut(db, 'handle', null); await recDBPut(db, 'meta', null); }catch(e){}
+  }catch(e){}
+  updateRecBar();
+}
+async function resumeRecSave(){
+  // 已持有文件句柄，只需重新授予修改权限（不弹文件选择器）
+  if(!recPending) return;
+  try{
+    // 自动检查：句柄文件内嵌记录与本文件不一致 -> 疑似复制副本，拦截并引导重新选择
+    const f = await recPending.getFile();
+    const text = await f.text();
+    const m = text.match(/<script id="bankRec" type="application\/json">([\s\S]*?)<\/script>/);
+    const other = m ? m[1].trim() : '';
+    if(other && other !== recSnap){
+      if(!confirm('检测到上次授权的文件与本文件的刷题记录不一致，可能是在使用复制的新副本。\n为避免写错文件：点「确定」改用「重新选择文件」指向当前文件；点「取消」则不恢复。')){
+        recPending = null; updateRecBar(); return;
+      }
+      recPending = null; updateRecBar();
+      enableRecSave(); return;
+    }
+    const ok = await recPending.queryPermission({mode:'readwrite'}) === 'granted'
+      || await recPending.requestPermission({mode:'readwrite'}) === 'granted';
+    if(ok){
+      recHandle = recPending; recPending = null; updateRecBar();
+      await saveRecToFile();
+    }
+  }catch(e){ recPending = null; updateRecBar(); }   // 句柄失效（文件移动/删除），回退首次开启流程
+}
+async function enableRecSave(){
+  if(!window.showOpenFilePicker) return;
+  const hint = '即将弹出系统窗口，请选择你正在使用的这个 HTML 文件本身（保持原位置，不要另存新文件）。\n\n选择后浏览器会询问「是否允许修改该文件」，点「允许」即完成开启，之后答题将自动保存到该文件。';
+  if(!confirm(hint)) return;
+  try{
+    const [h] = await window.showOpenFilePicker({
+      types: [{description:'HTML', accept:{'text/html':['.html']}}],
+    });
+    // 浏览器权限提示：允许修改所选文件（= 启动自动保存的确认）
+    const p = await h.queryPermission({mode:'readwrite'});
+    if(p !== 'granted'){
+      if(await h.requestPermission({mode:'readwrite'}) !== 'granted') return;
+    }
+    recHandle = h;
+    const db = await recDB(); await recDBPut(db, 'handle', h);
+    await recDBPut(db, 'meta', {id: FILE_ID, name: h.name});   // 记录身份，供下次恢复校验
+    updateRecBar();
+    await saveRecToFile();   // 授权后立即落盘一次
+  }catch(e){ /* 用户取消选择/授权 */ }
+}
+function recHTML(){
+  const el = document.getElementById('bankRec');
+  if(el) el.textContent = JSON.stringify(pw);
+  return '<!DOCTYPE html>\n' + document.documentElement.outerHTML;
+}
+async function saveRecToFile(){
+  if(!recHandle) return false;
+  try{
+    const w = await recHandle.createWritable();
+    await w.write(recHTML());
+    await w.close();
+    updateRecBar();
+    return true;
+  }catch(e){ return false; }
+}
+async function recFlush(){ if(recDirty){ recDirty = false; clearTimeout(recTimer); return saveRecToFile(); } return false; }
+function exportRec(){
+  const blob = new Blob([JSON.stringify(pw, null, 1)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '刷题记录备份.json';
+  a.click();
+}
+function importRec(){
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.json,application/json';
+  inp.onchange = ()=>{
+    const f = inp.files[0]; if(!f) return;
+    const rd = new FileReader();
+    rd.onload = ()=>{
+      try{
+        const d = JSON.parse(rd.result);
+        if(d && typeof d==='object'){ pw = d; pSave(); alert('导入成功'); }
+      }catch(e){ alert('文件格式不正确'); }
+    };
+    rd.readAsText(f);
+  };
+  inp.click();
+}
+function recBarHTML(){
+  const common = `<button class="btn ghost" onclick="clearRec()">清空记录</button>
+    <button class="btn ghost" onclick="exportRec()">导出</button>
+    <button class="btn ghost" onclick="importRec()">导入</button>`;
+  if(recHandle) return `
+    <span class="rb-ok">✓ 自动保存已开启${recHandle.name?' · '+recHandle.name:''}</span>${common}`;
+  if(recPending) return `
+    <span>已找到本文件 · <b>点「恢复」即可继续自动保存</b></span>
+    <button class="btn primary" onclick="resumeRecSave()">恢复自动保存</button>
+    <button class="btn ghost" onclick="enableRecSave()">重新选择文件</button>${common}`;
+  if(window.showOpenFilePicker) return `
+    <span>记录跟随本文件 · <b>开启后答题自动保存到文件</b></span>
+    <button class="btn primary" onclick="enableRecSave()">开启自动保存</button>${common}`;
+  return `<span>当前浏览器不支持写回文件</span>${common}`;
+}
+function clearRec(){
+  if(!confirm('将清空全部岗位的刷题记录（错误次数、掌握状态等），并写回本文件，不可恢复。确定清空？')) return;
+  pw = {};
+  pSave();
+  render();
+}
+function updateRecBar(){
+  const el = document.getElementById('recBar');
+  if(el) el.innerHTML = recBarHTML();
+}
+window.addEventListener('load', recRestore);
+window.addEventListener('pagehide', ()=>{ recFlush(); });
 
 function load(){
   try{ const d = JSON.parse(localStorage.getItem(KEY));
@@ -61,6 +234,7 @@ function render(){
   if(view==='exam' && exam) drawExam();
   if(view==='practice' && practice && !practice.done) drawPractice();
   bindGlobal();
+  updateRecBar();
 }
 function setPos(i){
   st.pos=i; st.rule=null; st.punits=null; st.ptypes=null; save();
