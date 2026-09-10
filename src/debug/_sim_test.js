@@ -33,7 +33,7 @@ global.window = { scrollTo(){} };
 global.requestAnimationFrame = cb => cb();
 global.cancelAnimationFrame = () => {};
 
-eval(script + '\n;globalThis.__h={bank:()=>BANK, exam:()=>exam, st:()=>st, view:()=>view, setExam:v=>{exam=v;}};');
+eval(script + '\n;globalThis.__h={bank:()=>BANK, exam:()=>exam, st:()=>st, view:()=>view, setExam:v=>{exam=v;}, pw:()=>pw, resetPw:()=>{pw={};}, practice:()=>practice};');
 
 let fails = 0;
 const ok = (cond,msg)=>{ console.log(`  [${cond?'PASS':'FAIL'}] ${msg}`); if(!cond) fails++; };
@@ -227,6 +227,58 @@ ok(__h.exam().score>0 && __h.exam().score<80, `一半答错得分介于0~80(实�
 __h.setExam(mkExam());
 submitExam();
 ok(__h.exam().score===0, '未作答得 0 分');
+
+// 8) 首页导航与刷题范围设置
+ok(__h.st().mode==='exam', '默认模式为模拟考试');
+setMode('practice');
+ok(__h.st().mode==='practice', '可切换到刷题练习模式');
+ok(vHome().includes('刷题练习') && vHome().includes('错题本'), '首页含模拟考试/刷题练习/错题本入口');
+const stA = __h.st(); stA.pos=0; save();
+const pset = vPracticeSetup();
+ok(pset.includes('练习范围') && pset.includes('随机混合') && pset.includes('按章节顺序'), '刷题设置页含练习范围/题型/顺序配置');
+ok((pset.match(/unit-row/g)||[]).length===1+pos0.b.length+pos0.c.length, '刷题范围单元行数=A类合集+B类组+C类组');
+
+// 9) 刷题列表抽取与章节顺序
+const plist = buildPracticeList();
+ok(plist.length>0, '默认范围能抽出题目');
+const stB = __h.st(); stB.porder='seq';
+const seqP = buildPracticeList();
+ok(seqP.length===plist.length && seqP.every((v,i)=>i===0||qAt(seqP[i]).ch>=qAt(seqP[i-1]).ch), '按章节顺序时题目按章节号递增');
+
+// 10) 答错入错题本、错误次数只增不减
+__h.resetPw();
+const qw = seqP[0];
+recordWrong(0, qw, false);
+ok(__h.pw()[0][qw] && __h.pw()[0][qw].fails===1, '答错一次记录错误次数 1');
+recordWrong(0, qw, false);
+ok(__h.pw()[0][qw].fails===2 && __h.pw()[0][qw].streak===0, '再答错次数累加为 2、连对计数清零');
+
+// 11) 答对不减次数、连对 3 次移入已掌握
+recordWrong(0, qw, true);
+ok(__h.pw()[0][qw].fails===2 && __h.pw()[0][qw].streak===1 && !__h.pw()[0][qw].mastered, '答对一次错误次数不变、连对 +1');
+recordWrong(0, qw, true); recordWrong(0, qw, true);
+const rw = __h.pw()[0][qw];
+ok(rw.fails===2 && rw.mastered===true, '连对 3 次后移入已掌握、历史错次保留');
+
+// 12) 强化练习只抽高频错题、重刷全部含全部待复习
+__h.resetPw();
+const qa2 = seqP.find(qi=>qAt(qi).t===0), qj2 = seqP.find(qi=>qAt(qi).t===2);
+recordWrong(0, qa2, false);                       // 错 1 次 -> 普通
+recordWrong(0, qj2, false); recordWrong(0, qj2, false);  // 错 2 次 -> 高频
+startWrong(true);
+ok(__h.practice() && __h.practice().list.length===1 && __h.practice().list[0]===qj2, '强化练习仅含高频（≥2次）错题');
+startWrong(false);
+const allWrong = __h.practice().list;
+ok(allWrong.length===2 && allWrong.includes(qa2) && allWrong.includes(qj2), '重刷全部含所有待复习错题');
+
+// 13) 错题本页面统计与动作
+const wpage = vWrong();
+ok(wpage.includes('待复习') && wpage.includes('已掌握') && wpage.includes('累计记录'), '错题本页含待复习/已掌握/累计记录统计卡');
+ok(wpage.includes('强化练习') && wpage.includes('重刷全部'), '错题本页含强化练习与重刷全部入口');
+reviveWrong(qa2); reviveWrong(qj2);
+ok(__h.pw()[0][qa2].mastered===false && __h.pw()[0][qa2].fails===1 && __h.pw()[0][qa2].streak===0, '拉回后回到待复习、错次保留');
+__h.resetPw();
+const stC = __h.st(); stC.porder=undefined; save();
 
 console.log(fails? `\n存在 ${fails} 个 FAIL`:'\n全部 PASS');
 process.exit(fails?1:0);

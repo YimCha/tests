@@ -311,6 +311,40 @@ main.wide{max-width:1280px}
 .rv-answer .okc{color:var(--good)}
 .rv-note{margin-top:10px;padding:11px 14px;border-radius:11px;background:rgba(216,167,92,.07);border:1px solid rgba(226,186,116,.22);font-size:13px;color:var(--ink);line-height:1.75;white-space:pre-wrap}
 
+/* 首页导航标签 */
+.top-tabs{display:flex;gap:10px;margin:4px 0 20px;flex-wrap:wrap}
+.top-tab{padding:10px 20px;border-radius:12px;border:1px solid var(--line);color:var(--muted);font-size:14px;font-weight:700;letter-spacing:2px;transition:.2s;display:flex;align-items:center;gap:8px}
+.top-tab:hover{border-color:var(--line2);color:var(--gold-hi)}
+.top-tab.on{color:#241708;background:linear-gradient(140deg,#f5e3b8,#c8933f);border-color:transparent;box-shadow:0 10px 24px -10px rgba(216,167,92,.55)}
+
+/* 刷题 · 范围选择 */
+.p-setup{max-width:840px;margin:0 auto}
+.unit-row{display:flex;align-items:center;gap:12px;padding:11px 14px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.03);cursor:pointer;transition:.15s}
+.unit-row:hover{border-color:var(--line2);background:rgba(216,167,92,.05)}
+.unit-row.on{border-color:var(--line2);background:rgba(216,167,92,.09)}
+.unit-row .u-box{width:20px;height:20px;border-radius:6px;border:1px solid var(--line2);display:grid;place-items:center;font-size:11px;color:#241708;flex:none}
+.unit-row.on .u-box{background:linear-gradient(140deg,#f5e3b8,#c8933f);border-color:transparent}
+.unit-row .u-name{flex:1;font-size:14px;color:var(--ink)}
+.unit-row .u-num{font-size:12px;color:var(--faint);font-family:var(--f-num)}
+.seg-row{display:flex;gap:9px;margin:12px 0 2px;flex-wrap:wrap}
+.seg{flex:1;min-width:100px;padding:13px;border-radius:12px;border:1px solid var(--line);text-align:center;cursor:pointer;font-size:13.5px;color:var(--muted);transition:.15s}
+.seg:hover{border-color:var(--line2);color:var(--gold-hi)}
+.seg.on{color:#241708;background:linear-gradient(140deg,#f5e3b8,#c8933f);border-color:transparent;font-weight:800;box-shadow:0 8px 20px -8px rgba(216,167,92,.5)}
+
+/* 错题频次标签 */
+.freq{font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;flex:none;white-space:nowrap}
+.freq.f1{color:var(--muted);background:rgba(255,255,255,.06);border:1px solid var(--line)}
+.freq.f2{color:var(--gold-hi);background:rgba(216,167,92,.14);border:1px solid rgba(226,186,116,.35)}
+.freq.f3{color:#ffd6db;background:rgba(233,104,116,.16);border:1px solid rgba(233,104,116,.45)}
+.freq.ok{color:#9fe0c4;background:rgba(95,195,162,.13);border:1px solid rgba(95,195,162,.4)}
+
+/* 刷题答题 */
+.p-judge{font-size:13px;font-weight:800;letter-spacing:.5px}
+.p-judge.ok{color:var(--good)}.p-judge.no{color:var(--bad)}
+.p-note{margin-top:16px;padding:12px 15px;border-radius:12px;background:rgba(216,167,92,.07);border:1px solid rgba(226,186,116,.24);font-size:13.5px;line-height:1.75;white-space:pre-wrap}
+.exam-nav button.no{background:rgba(233,104,116,.16);border-color:rgba(233,104,116,.4)}
+.exam-nav button.no b{color:#ffb3bb}
+
 /* 页脚 */
 footer{position:relative;z-index:1;text-align:center;color:var(--faint);font-size:12px;padding:6px 0 24px;letter-spacing:1.5px}
 footer div{margin:2px 0}
@@ -342,10 +376,20 @@ let st = load();
 let pools = buildPools();
 let view = 'home';
 
+/* 错题本存储（独立 key，与模拟考设置互不影响；localStorage 持久化，同浏览器重开保留） */
+const PKEY = 'srbank_practice_v1';
+const MASTER_STREAK = 3;   // 连续答对 N 次视为掌握
+const HIGH_FAILS = 2;      // 高频错题阈值（错误次数 >= 此值）
+let pw = pLoad();
+function pLoad(){
+  try{ const d = JSON.parse(localStorage.getItem(PKEY)); return (d && typeof d==='object') ? d : {}; }catch(e){ return {}; }
+}
+function pSave(){ localStorage.setItem(PKEY, JSON.stringify(pw)); }
+
 function load(){
   try{ const d = JSON.parse(localStorage.getItem(KEY));
-    return Object.assign({pos:0, types:[40,25,15], rule:null, dur:60}, d);
-  }catch(e){ return {pos:0, types:[40,25,15], rule:null, dur:60}; }
+    return Object.assign({pos:0, types:[40,25,15], rule:null, dur:60, mode:'exam'}, d);
+  }catch(e){ return {pos:0, types:[40,25,15], rule:null, dur:60, mode:'exam'}; }
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(st)); }
 
@@ -379,41 +423,67 @@ function render(){
   let html='';
   if(view==='home') html = vHome();
   else if(view==='exam') html = vExam();
+  else if(view==='practice') html = vPractice();
+  else if(view==='wrong') html = vWrong();
   app.innerHTML = html;
-  app.classList.toggle('wide', view==='exam' && !exam);
+  app.classList.toggle('wide', (view==='exam' && !exam) || view==='practice' || view==='wrong');
   if(view==='exam' && exam) drawExam();
+  if(view==='practice' && practice && !practice.done) drawPractice();
   bindGlobal();
 }
-function setPos(i){ st.pos=i; st.rule=null; save(); go('exam'); }
+function setPos(i){
+  st.pos=i; st.rule=null; st.punits=null; st.ptypes=null; save();
+  go(st.mode==='wrong' ? 'wrong' : (st.mode==='practice' ? 'practice' : 'exam'));
+}
+function setMode(m){ st.mode=m; save(); render(); }
 
 /* ================= 首页 ================= */
 function vHome(){
-  const cards = BANK.positions.map((p,i)=>{
-    const pool = poolFor(i);
-    const cls = {A:pool.A.length, B:pool.B.length, C:pool.C.length};
-    const tot = cls.A+cls.B+cls.C;
-    const w = {A:cls.A/tot*100, B:cls.B/tot*100, C:cls.C/tot*100};
-    return `
-    <div class="card pos-card ${i===st.pos?'on':''}" onclick="setPos(${i})">
-      <div class="pc-head">
-        <div class="pc-check">✓</div>
-        <div class="pc-name">${p.name}</div>
-        <div class="pc-num">${tot}<small>题</small></div>
-      </div>
-      <div class="bar3">
-        <i class="ba" style="width:${w.A}%"></i>
-        <i class="bb" style="width:${w.B}%"></i>
-        <i class="bc" style="width:${w.C}%"></i>
-      </div>
-      <div class="pc-stats">
-        <span><i style="background:var(--a)"></i>A类 <b>${cls.A}</b><em>题</em></span>
-        <span><i style="background:var(--b)"></i>B类 <b>${cls.B}</b><em>题</em></span>
-        <span><i style="background:var(--c)"></i>C类 <b>${cls.C}</b><em>题</em></span>
-      </div>
-    </div>`;
-  }).join('');
+  const tabs = [['exam','模拟考试'],['practice','刷题练习'],['wrong','错题本']].map(t=>
+    `<button class="top-tab ${st.mode===t[0]?'on':''}" onclick="setMode('${t[0]}')">${t[1]}</button>`).join('');
+  const title = {exam:'请选择考试岗位', practice:'选择岗位 · 刷题练习', wrong:'选择岗位 · 错题本'}[st.mode];
+  let cards;
+  if(st.mode==='wrong'){
+    cards = BANK.positions.map((p,i)=>{
+      const n = wrongCount(i), act = wrongAct(i), ok = wrongOK(i);
+      return `
+      <div class="card pos-card ${i===st.pos?'on':''}" onclick="setPos(${i})">
+        <div class="pc-head"><div class="pc-check">✓</div>
+          <div class="pc-name">${p.name}</div>
+          <div class="pc-num">${n}<small>错题</small></div></div>
+        <div class="pc-stats"><span>待复习 <b class="num">${act}</b><em>题</em></span>
+          <span>已掌握 <b class="num">${ok}</b><em>题</em></span></div>
+      </div>`;
+    }).join('');
+  } else {
+    cards = BANK.positions.map((p,i)=>{
+      const pool = poolFor(i);
+      const cls = {A:pool.A.length, B:pool.B.length, C:pool.C.length};
+      const tot = cls.A+cls.B+cls.C;
+      const w = {A:cls.A/tot*100, B:cls.B/tot*100, C:cls.C/tot*100};
+      return `
+      <div class="card pos-card ${i===st.pos?'on':''}" onclick="setPos(${i})">
+        <div class="pc-head">
+          <div class="pc-check">✓</div>
+          <div class="pc-name">${p.name}</div>
+          <div class="pc-num">${tot}<small>题</small></div>
+        </div>
+        <div class="bar3">
+          <i class="ba" style="width:${w.A}%"></i>
+          <i class="bb" style="width:${w.B}%"></i>
+          <i class="bc" style="width:${w.C}%"></i>
+        </div>
+        <div class="pc-stats">
+          <span><i style="background:var(--a)"></i>A类 <b>${cls.A}</b><em>题</em></span>
+          <span><i style="background:var(--b)"></i>B类 <b>${cls.B}</b><em>题</em></span>
+          <span><i style="background:var(--c)"></i>C类 <b>${cls.C}</b><em>题</em></span>
+        </div>
+      </div>`;
+    }).join('');
+  }
   return `
-  <div class="sec-title"><span class="diamond"></span><h2>请选择考试岗位</h2></div>
+  <div class="top-tabs">${tabs}</div>
+  <div class="sec-title"><span class="diamond"></span><h2>${title}</h2></div>
   <div class="grid c3">${cards}</div>`;
 }
 
@@ -421,6 +491,7 @@ function vHome(){
 function onOptClick(el){
   const qi = +el.dataset.qi;
   if(view==='exam' && exam && !exam.done) toggleExamSelect(qi, el);
+  else if(view==='practice' && practice && !practice.done && !practice.st[qi]) practicePick(qi, el);
 }
 function bindGlobal(){
   requestAnimationFrame(()=>{
@@ -905,32 +976,345 @@ function vExamResult(){
 }
 
 
+/* ================= 刷题练习 ================= */
+let practice = null;
+
+function practiceUnits(){
+  const pos = BANK.positions[st.pos], pool = poolFor(st.pos);
+  return [
+    {id:'A', tag:'A', sub:'所有部门 A 类题合集', qs:pool.A},
+    ...pos.b.map((g,i)=>({id:'B'+i, tag:'B', sub:grpText(g), qs:pool.B.filter(qi=>g[0].includes(deptOf(qi)))})),
+    ...pos.c.map((g,i)=>({id:'C'+i, tag:'C', sub:grpText(g), qs:pool.C.filter(qi=>g[0].includes(deptOf(qi)))})),
+  ];
+}
+function selUnits(){ return st.punits || practiceUnits().map(u=>u.id); }
+function toggleUnit(id){
+  const s = selUnits().slice();
+  const i = s.indexOf(id);
+  if(i>=0) s.splice(i,1); else s.push(id);
+  st.punits = s; save(); render();
+}
+function togglePType(t){
+  const a = (st.ptypes||[true,true,true]).slice();
+  a[t] = !a[t];
+  st.ptypes = a; save(); render();
+}
+function setPOrder(o){ st.porder = o; save(); render(); }
+function buildPracticeList(){
+  const units = practiceUnits(), sel = selUnits(), tsel = st.ptypes||[true,true,true];
+  let list = [];
+  units.forEach(u=>{ if(sel.includes(u.id)) u.qs.forEach(qi=>{ if(tsel[qAt(qi).t]) list.push(qi); }); });
+  if(st.porder==='seq') list.sort((a,b)=>(qAt(a).ch-qAt(b).ch)||(a-b));
+  else list = shuffle(list);
+  return list;
+}
+function startPractice(){
+  const list = buildPracticeList();
+  if(!list.length){ alert('当前筛选没有可练题目，请调整范围或题型'); return; }
+  practice = {list, cur:0, st:{}, done:false, src:'normal'};
+  go('practice');
+}
+function vPractice(){
+  if(!practice) return vPracticeSetup();
+  if(practice.done) return vPracticeResult();
+  return `
+  <div class="exam-topbar">
+    <button class="btn ghost" onclick="exitPractice()">← 返回</button>
+    <div class="et-info">
+      <span class="exam-pos">第 <b class="num">1</b> / ${practice.list.length} 题</span>
+      <span class="exam-done">已答 <b class="num">0</b> · 未答 <b class="num">${practice.list.length}</b></span>
+    </div>
+  </div>
+  <div id="practiceBox"></div>
+  <div class="card exam-navcard">
+    <div class="exam-legend">
+      <span><i class="lg-done"></i>答对</span>
+      <span style="color:var(--bad)"><i class="lg-mark" style="box-shadow:inset 0 0 0 1px rgba(233,104,116,.6)"></i>答错</span>
+      <span><i style="box-shadow:inset 0 0 0 1px var(--line2)"></i>未答</span>
+    </div>
+    <div class="exam-nav" id="practiceNav"></div>
+  </div>`;
+}
+function vPracticeSetup(){
+  const pos = BANK.positions[st.pos];
+  const units = practiceUnits(), sel = selUnits(), tsel = st.ptypes||[true,true,true];
+  const unitRows = units.map(u=>`
+    <div class="unit-row ${sel.includes(u.id)?'on':''}" onclick="toggleUnit('${u.id}')">
+      <span class="u-box">${sel.includes(u.id)?'✓':''}</span>
+      <span class="rp-tag" style="--c:${CLS_INFO[u.tag]}">${u.tag}</span>
+      <span class="u-name">${u.sub}</span>
+      <span class="u-num num">${u.qs.length} 题</span>
+    </div>`).join('');
+  const segs = TYPES.map((n,t)=>`<button class="seg ${tsel[t]?'on':''}" onclick="togglePType(${t})">${n}</button>`).join('');
+  const orderBtns = [['rand','随机混合'],['seq','按章节顺序']].map(o=>
+    `<button class="seg ${st.porder===o[0]?'on':''}" onclick="setPOrder('${o[0]}')">${o[1]}</button>`).join('');
+  const cnt = buildPracticeList().length;
+  return `
+  <div class="p-setup card">
+    <div class="seal-ring" style="margin:0 auto 6px">练</div>
+    <div class="es-title">刷题练习 · ${pos.name}</div>
+    <div class="es-notice">即时反馈：选择答案立即判断对错并展示解析；答错的题自动记入该岗位错题本，连续答对 ${MASTER_STREAK} 次后移入「已掌握」（历史错次保留）。</div>
+    <div class="es-sec">练习范围</div>
+    <div class="type-panel" style="gap:9px">${unitRows}</div>
+    <div class="es-sec">题型</div>
+    <div class="seg-row">${segs}</div>
+    <div class="es-sec">顺序</div>
+    <div class="seg-row">${orderBtns}</div>
+    <div class="es-actions">
+      <button class="btn ghost" onclick="go('home')">重新选岗位</button>
+      <button class="btn primary" onclick="startPractice()">开始刷题 ${cnt?`<b class="num">${cnt}</b> 题`:''}</button>
+    </div>
+  </div>`;
+}
+function vPracticeResult(){
+  const p = practice, wrong = p.total - p.ok;
+  const remain = p.src!=='normal' ? wrongAct(st.pos) : null;
+  return `
+  <div class="card result-hero" style="max-width:640px;margin:0 auto">
+    <div class="score">${p.ok}<small> / ${p.total} 题</small></div>
+    <div class="verdict">答对 ${p.ok} 题 · 答错 ${wrong} 题${remain!=null?` · 错题本剩余 <b class="num">${remain}</b> 题`:''}</div>
+    <div class="es-actions" style="margin-top:16px">
+      <button class="btn primary" onclick="finishPracticeAgain()">再来一组</button>
+      <button class="btn ghost" onclick="practiceBack()">返回选择</button>
+    </div>
+  </div>`;
+}
+function finishPracticeAgain(){
+  const src = practice && practice.src;
+  practice = null;
+  if(src==='normal') startPractice();
+  else go('wrong');
+}
+function practiceBack(){
+  const back = practice && practice.src!=='normal' ? 'wrong' : 'practice';
+  practice = null; go(back);
+}
+function finishPractice(){
+  if(!practice || practice.done) return;
+  let ok = 0;
+  practice.list.forEach(qi=>{ if(practice.st[qi] && practice.st[qi].ok) ok++; });
+  practice.ok = ok; practice.total = practice.list.length; practice.done = true;
+  render();
+}
+function drawPractice(){
+  if(!practice || practice.done) return;
+  const i = practice.cur, qi = practice.list[i], q = qAt(qi);
+  const stt = practice.st[qi] || null;
+  document.getElementById('practiceBox').innerHTML = qCard(qi,{n:i+1,total:practice.list.length,
+    instant:true, st:stt, chapName:BANK.chapters[q.ch]});
+  document.getElementById('practiceNav').innerHTML = practice.list.map((_,j)=>pNavBtn(j)).join('');
+  updatePracticeHead();
+  bindGlobal();
+}
+function pNavBtn(i){
+  const qi = practice.list[i], t = qAt(qi).t;
+  const ps = practice.st[qi], cls = [];
+  if(i===practice.cur) cls.push('on');
+  if(ps) cls.push(ps.ok?'done':'no');
+  return `<button class="${cls.join(' ')}" onclick="jumpPractice(${i})">
+    <i class="tt" style="--c:${TYPE_COLORS[t]}">${TYPES[t]}</i><b>${i+1}</b></button>`;
+}
+function updatePracticeHead(){
+  const el = document.querySelector('.exam-done');
+  if(el && practice){
+    const done = Object.keys(practice.st).length;
+    el.innerHTML = `已答 <b class="num">${done}</b> · 未答 <b class="num">${practice.list.length-done}</b>`;
+  }
+  const pos = document.querySelector('.exam-pos');
+  if(pos && practice) pos.innerHTML = `第 <b class="num">${practice.cur+1}</b> / ${practice.list.length} 题`;
+}
+function practicePick(qi, el){
+  const q = qAt(qi);
+  if(q.t===1){ el.classList.toggle('sel'); return; }   // 多选：勾选后点「确认答案」再判分
+  lockPractice(qi, [el.dataset.key]);
+}
+function practiceConfirm(qi){
+  const card = document.querySelector(`.q-card[data-qi="${qi}"]`);
+  const ua = card ? [...card.querySelectorAll('.opt.sel')].map(o=>o.dataset.key) : [];
+  if(!ua.length) return;
+  lockPractice(qi, ua);
+}
+function lockPractice(qi, ua){
+  if(practice.st[qi]) return;
+  const ok = judgeOK(qAt(qi), ua);
+  practice.st[qi] = {ua, ok};
+  recordWrong(st.pos, qi, ok);
+  updatePracticeHead(); drawPractice();
+}
+function prevPractice(){ if(!practice||practice.done)return; if(practice.cur>0){practice.cur--;drawPractice();} }
+function nextPractice(){ if(!practice||practice.done)return; if(practice.cur<practice.list.length-1){practice.cur++;drawPractice();} }
+function jumpPractice(i){ if(!practice||practice.done)return; practice.cur=i; drawPractice(); }
+function exitPractice(){
+  if(practice && !practice.done && !confirm('退出后本次刷题进度将丢失，确定返回？')) return;
+  practiceBack();
+}
+
+/* ================= 错题本 ================= */
+function wrongP(pi){ return pw[pi] || (pw[pi] = {}); }
+function wrongCount(pi){ return Object.keys(pw[pi]||{}).length; }
+function wrongAct(pi){ return Object.values(pw[pi]||{}).filter(r=>!r.mastered).length; }
+function wrongOK(pi){ return Object.values(pw[pi]||{}).filter(r=>r.mastered).length; }
+function recordWrong(pi, qi, ok){
+  const m = wrongP(pi);
+  if(!ok){
+    const r = m[qi] || (m[qi] = {fails:0, streak:0, mastered:false});
+    r.fails++; r.streak = 0; r.mastered = false;   // 答错：次数只增不减，连对计数清零并拉回待复习
+  } else if(m[qi] && !m[qi].mastered){
+    const r = m[qi];
+    r.streak++;
+    if(r.streak >= MASTER_STREAK) r.mastered = true;   // 连对 N 次移入已掌握，历史错次保留
+  }
+  pSave();
+}
+function freqBadge(r){
+  if(r.mastered) return '<span class="freq ok">已掌握</span>';
+  if(r.fails>=3) return `<span class="freq f3">顽固 ×${r.fails}</span>`;
+  if(r.fails>=2) return `<span class="freq f2">高频 ×${r.fails}</span>`;
+  return `<span class="freq f1">×${r.fails}</span>`;
+}
+function vWrong(){
+  const pos = BANK.positions[st.pos];
+  const m = wrongP(st.pos);
+  const recs = Object.keys(m).map(Number).filter(qi=>qi<BANK.q.length && m[qi])
+    .map(qi=>({qi, fails:m[qi].fails, streak:m[qi].streak, mastered:!!m[qi].mastered}));
+  const act = recs.filter(r=>!r.mastered), okd = recs.filter(r=>r.mastered);
+  const high = act.filter(r=>r.fails>=HIGH_FAILS).length;
+  const row = r => {
+    const q = BANK.q[r.qi];
+    return `<div class="review-row" onclick="toggleReviewP(${r.qi})">
+      <span class="rv-ic" style="background:rgba(233,104,116,.14);color:var(--bad)">✕</span>
+      <span class="rv-chap">${BANK.chapters[q.ch]}</span>
+      <span class="rv-stem">${esc(q.s)}</span>
+      ${freqBadge(r)}
+      <span class="rv-meta num">错${r.fails}次</span>
+      <div class="rv-detail" id="rv-d-${r.qi}">${reviewPractice(r)}</div>
+    </div>`;
+  };
+  const actRows = act.map(row).join('') || '<div style="padding:26px;text-align:center;color:var(--faint)">暂无待复习错题，去刷题练习吧</div>';
+  const okRows = okd.map(r=>`
+    <div class="review-row" onclick="toggleReviewP(${r.qi})">
+      <span class="rv-ic" style="background:rgba(95,195,162,.14);color:var(--good)">✓</span>
+      <span class="rv-chap">${BANK.chapters[BANK.q[r.qi].ch]}</span>
+      <span class="rv-stem">${esc(BANK.q[r.qi].s)}</span>
+      ${freqBadge(r)}
+      <span class="rv-meta num">错${r.fails}次</span>
+      <button class="btn sm ghost" onclick="event.stopPropagation();reviveWrong(${r.qi})">拉回</button>
+      <div class="rv-detail" id="rv-d-${r.qi}">${reviewPractice(r)}</div>
+    </div>`).join('') || '<div style="padding:18px;text-align:center;color:var(--faint)">暂无已掌握题目</div>';
+  return `
+  <div class="exam-topbar">
+    <button class="btn ghost" onclick="go('home')">← 返回选岗</button>
+    <div class="et-info"><span class="exam-pos">${pos.name} · 错题本</span></div>
+  </div>
+  <div class="grid c3" style="margin-bottom:16px">
+    <div class="card p-setup" style="padding:20px">
+      <div class="panel-title">待复习</div>
+      <div class="score" style="font-size:44px;margin:2px 0">${act.length}<small> 题</small></div>
+      <div style="font-size:12.5px;color:var(--muted)">高频（≥${HIGH_FAILS} 次）<b class="num" style="color:var(--gold-hi)">${high}</b> 题</div>
+      <div class="q-foot" style="margin-top:16px">
+        <button class="btn primary" ${high?'':'disabled'} onclick="startWrong(true)">强化练习 ${high?`（${high} 题）`:''}</button>
+        <button class="btn ghost" ${act.length?'':'disabled'} onclick="startWrong(false)">重刷全部</button>
+      </div>
+    </div>
+    <div class="card p-setup" style="padding:20px">
+      <div class="panel-title">已掌握</div>
+      <div class="score" style="font-size:44px;margin:2px 0">${okd.length}<small> 题</small></div>
+      <div style="font-size:12.5px;color:var(--muted)">连对 ${MASTER_STREAK} 次自动移入，历史错次保留</div>
+    </div>
+    <div class="card p-setup" style="padding:20px">
+      <div class="panel-title">累计记录</div>
+      <div class="score" style="font-size:44px;margin:2px 0">${recs.length}<small> 题</small></div>
+      <div style="font-size:12.5px;color:var(--muted)">含已掌握，错误次数只增不减</div>
+    </div>
+  </div>
+  <div class="sec-title"><span class="diamond"></span><h2>待复习</h2><small>点击行展开解析</small></div>
+  <div class="card" style="padding:6px 0">${actRows}</div>
+  <div class="sec-title"><span class="diamond"></span><h2>已掌握</h2><small>可拉回待复习</small></div>
+  <div class="card" style="padding:6px 0">${okRows}</div>`;
+}
+function reviewPractice(r){
+  const q = BANK.q[r.qi];
+  return `<div class="rv-stem-full">${esc(q.s)}</div>
+    <div class="rv-answer">正确答案：<b class="okc">${q.t===2?(q.a==='对'?'对':'错'):[...q.a].join('')}</b>　·　错误 <b class="num">${r.fails}</b> 次　·　连对 <b class="num">${r.streak}</b> 次</div>
+    ${q.n?`<div class="rv-note">解析：${esc(q.n)}</div>`:''}`;
+}
+function toggleReviewP(qi){ const el = document.getElementById('rv-d-'+qi); if(el) el.closest('.review-row').classList.toggle('open'); }
+function reviveWrong(qi){
+  const r = wrongP(st.pos)[qi];
+  if(r){ r.mastered = false; r.streak = 0; pSave(); render(); }
+}
+function weightedOrder(arr, w){
+  const pool = [];
+  arr.forEach(a=>{ const n = Math.max(1, w(a)); for(let k=0;k<n;k++) pool.push(a); });
+  for(let i=pool.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [pool[i],pool[j]]=[pool[j],pool[i]]; }
+  const seen = new Set(), out = [];
+  pool.forEach(a=>{ if(!seen.has(a)){ seen.add(a); out.push(a); } });
+  return out;
+}
+function startWrong(hardOnly){
+  const m = wrongP(st.pos);
+  let list = Object.keys(m).map(Number).filter(qi=>qi<BANK.q.length && BANK.q[qi] && !m[qi].mastered);
+  if(hardOnly) list = list.filter(qi=>m[qi].fails>=HIGH_FAILS);
+  if(!list.length) return;
+  practice = {list: weightedOrder(list, qi=>m[qi].fails), cur:0, st:{}, done:false, src: hardOnly?'hard':'wrong'};
+  go('practice');
+}
+
 /* ================= 题目卡渲染 ================= */
 function qCard(qi, o){
   const q=qAt(qi);
   const letters=['A','B','C','D','E','F','G','H'];
+  const right=[...q.a];
+  const LK = o.st || null;                     // 刷题锁定记录 {ua, ok}，null 表示未作答
+  const optCls = v => {
+    if(!LK) return (o.sel||[]).includes(v)?'sel':'';
+    const c = [];
+    if(right.includes(v)) c.push('right');
+    if(LK.ua.includes(v) && !right.includes(v)) c.push('wrong');
+    if(!c.length) c.push('lock');
+    return c.join(' ');
+  };
+  const tick = v => (LK && !LK.ok && LK.ua.includes(v)) ? '✕' : '✓';
   let opts;
   if(q.t===2){
-    opts=['对','错'].map((v,i)=>`
-      <div class="opt ${o.sel.includes(v)?'sel':''}" data-qi="${qi}" data-key="${v}">
-        <span class="key">${v==='对'?'✓':'✕'}</span><span class="txt">${v}</span><span class="tick">✓</span></div>`).join('');
+    opts=['对','错'].map(v=>`
+      <div class="opt ${optCls(v)}" data-qi="${qi}" data-key="${v}">
+        <span class="key">${v==='对'?'✓':'✕'}</span><span class="txt">${v}</span><span class="tick">${tick(v)}</span></div>`).join('');
   } else {
-    opts=q.o.map((txt,i)=>`
-      <div class="opt ${o.sel.includes(letters[i])?'sel':''}" data-qi="${qi}" data-key="${letters[i]}">
-        <span class="key">${letters[i]}</span><span class="txt">${esc(txt)}</span><span class="tick">✓</span></div>`).join('');
+    opts=q.o.map((txt,i)=>{
+      const L=letters[i];
+      return `<div class="opt ${optCls(L)}" data-qi="${qi}" data-key="${L}">
+        <span class="key">${L}</span><span class="txt">${esc(txt)}</span><span class="tick">${tick(L)}</span></div>`;}).join('');
   }
   const badge = q.t===0?'single':(q.t===1?'multi':'judge');
   const chap = o.chapName? `<span class="badge chap">${o.chapName}</span>`:'';
-  const marked = o.exam && exam && exam.mark[qi]? `<span class="badge" style="color:var(--bad);border:1px solid rgba(233,104,116,.4);background:rgba(233,104,116,.1)">已标记</span>`:'';
-  const isLast = o.exam && exam && exam.cur>=exam.paper.length-1;
-  const examFoot = o.exam && exam ? `
+  const marked = (o.exam && exam && exam.mark[qi]) ? `<span class="badge" style="color:var(--bad);border:1px solid rgba(233,104,116,.4);background:rgba(233,104,116,.1)">已标记</span>`:'';
+  let foot = '';
+  if(o.exam && exam){
+    const isLast = exam.cur>=exam.paper.length-1;
+    foot = `
     <div class="q-foot">
       <button class="btn ghost" onclick="prevExam()">上一题</button>
       <button class="btn ${exam.mark[qi]?'primary':'ghost'}" onclick="toggleMark()">${exam.mark[qi]?'已标记':'标记'}</button>
       <span class="q-foot-spacer"></span>
       <button class="btn ${isLast?'primary':'ghost'}" onclick="submitExam()">交卷</button>
       ${isLast?'':`<button class="btn primary" onclick="nextExam()">下一题</button>`}
-    </div>`:'';
+    </div>`;
+  } else if(o.instant){
+    const answered = !!LK;
+    const isMul = q.t===1 && !answered;
+    foot = `
+    <div class="q-foot">
+      <button class="btn ghost" onclick="prevPractice()">上一题</button>
+      ${isMul?`<button class="btn primary" onclick="practiceConfirm(${qi})">确认答案</button>`:''}
+      ${answered?`<span class="p-judge ${LK.ok?'ok':'no'}">${LK.ok?'回答正确':'回答错误'}</span>`:''}
+      <span class="q-foot-spacer"></span>
+      <button class="btn primary" onclick="finishPractice()">完成练习</button>
+      ${practice && practice.cur<practice.list.length-1?`<button class="btn ghost" onclick="nextPractice()">下一题</button>`:''}
+    </div>
+    ${answered && q.n?`<div class="p-note">解析：${esc(q.n)}</div>`:''}
+    ${answered?`<div class="rv-answer" style="margin-top:14px">你的答案：<b>${LK.ua.join('')||'未作答'}</b>　·　正确答案：<b class="okc">${q.t===2?(q.a==='对'?'对':'错'):right.join('')}</b></div>`:''}`;
+  }
   return `
   <div class="card q-card" data-qi="${qi}" data-locked="${o.lock?'1':'0'}">
     <div class="q-head">
@@ -942,7 +1326,7 @@ function qCard(qi, o){
     </div>
     <div class="q-stem">${esc(q.s)}</div>
     <div class="opts">${opts}</div>
-    ${examFoot}
+    ${foot}
   </div>`;
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }

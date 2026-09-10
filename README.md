@@ -1,6 +1,6 @@
 # 银行上岗考试题库处理脚本
 
-将各部门原始题库（Word）解析为结构化数据，并按岗位 A/B/C 比例生成离线模拟考试工具。
+将各部门原始题库（Word）解析为结构化数据，并按岗位 A/B/C 比例生成离线模拟考试与刷题练习工具（单文件 HTML）。
 **本仓库只含代码与空模板，题库数据与银行信息均不提交。**
 
 ## 设计原则
@@ -21,7 +21,7 @@ data/master_bank.xlsx（题目，唯一人工编辑入口）
 data/config.xlsx（岗位配置 + 工具元数据，唯一人工编辑入口）
    │  src/bank_loader.py（直读两个 xlsx + 按章节名自动推导岗位归属，公共数据源）
    ▼
-src/build_bank.py → 离线模拟考试工具 HTML（文件名来自 config 的「工具配置」）
+src/build_bank.py → 离线模拟考试 + 刷题练习工具 HTML（文件名来自 config 的「工具配置」）
 ```
 
 不产生常驻的中间 JSON：所有下游脚本都通过 `bank_loader.py` 直接读取
@@ -50,12 +50,12 @@ src/build_bank.py → 离线模拟考试工具 HTML（文件名来自 config 的
 ```
 src/                  # 代码（纯代码，无业务信息）
   bank_loader.py      # 直读 master_bank.xlsx + config.xlsx，组装 BANK 结构 + 岗位自动推导（公共数据源）
-  build_bank.py       # master_bank.xlsx + config.xlsx -> 离线模拟考试工具 HTML
+  build_bank.py       # master_bank.xlsx + config.xlsx -> 离线模拟考试 + 刷题练习工具 HTML
   template.html       # 工具模板（含 __BANK_DATA__ / __TOOL_TITLE__ / __FOOTER_*__ 占位符，无真实数据）
   _app_script.js      # 工具主逻辑 JS（与 template.html 同步）
   _test_logic.js      # 组卷比例验证脚本
   debug/
-    _sim_test.js      # 考试流程模拟测试（含 JS 语法校验）
+    _sim_test.js      # 考试与刷题流程模拟测试（含 JS 语法校验）
     _output.json      # build_bank.py 生成的成品文件名（测试脚本据此定位，git 忽略）
 
 templates/            # 空模板（提交到仓库，供参与者了解格式）
@@ -69,7 +69,7 @@ data/                 # 题库数据（本地使用，git 忽略，从 templates
   tmp/                # 临时中间产物
   output/             # 运行产物
 
-刷题工具.html          # 生成的单文件离线工具（内嵌题库数据，git 忽略）
+模拟考试工具.html      # 生成的单文件离线工具（内嵌题库数据，模拟考试 + 刷题练习，git 忽略）
 ```
 
 ## 主流程
@@ -84,7 +84,7 @@ python src/build_bank.py
 
 # 3) 验证
 node src/_test_logic.js     # 组卷比例（6 岗位 × 10 次）
-node src/debug/_sim_test.js # 考试流程（62 项断言）
+node src/debug/_sim_test.js # 考试与刷题流程（81 项断言）
 ```
 
 ## 依赖
