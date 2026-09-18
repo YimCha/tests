@@ -20,7 +20,7 @@
   - 输出列与母题库一致：章节 / 源题号 / 题型 / 题干 / 选项A-H / 正确答案 / 解析 / 需复核。
   - 判断题的选项列固定写 对 / 错，正确答案写 对 / 错。
   - import 只生成「初版」，**不覆盖** data/master_bank.xlsx（Word 原文是终极真值）；
-    verify 把初版（= 现代码解析结果）与母题库逐题比对，找出人工清洗漂移与残留异常。
+    verify 把初版（= 现代码解析结果）与母题库逐题比对，找出母题库确定性去标注/重述与残留异常。
   - 路径与部门名全部从数据推导，代码不含任何业务信息。
 
 退出码（仅 verify）
@@ -141,6 +141,40 @@ def strip_option_noise(txt):
 
 def clean_stem(s):
     return re.sub(r'\s{2,}', ' ', s).strip().strip('"“”\u3000 ')
+
+
+# 母题库统一规则：把题干里内嵌的正确答案标注剥掉。
+# 原始 Word 把答案字母/答案说明写在题干里（泄题），考试版（母题库）需去标注。
+# 这与项目约定"题干用（）占位、不写答案"一致。
+ANS_NOTE_TAIL_RE = re.compile(r'\s*答案\s*[:：].*$')                       # 尾部"答案：…"说明
+TAIL_ANS_BR_RE = re.compile(r'[【\[（(]\s*[A-Za-z]\s*[】\]）)]\s*[。．、]?\s*$')  # 尾部单字母标注（含尾标点）
+INLINE_ANS_BR_RE = re.compile(r'[【\[（(]\s*([A-Za-z])\s*[】\]）)]\s*')        # 内嵌单字母标注
+
+
+def clean_stem_annotations(stem, options):
+    """题干去答案标注：返回 (清洗后题干, 是否发生过清洗)。
+
+    ① 尾部"答案：…"说明 → 整段删除；
+    ② 尾部单字母标注（【X】/（X）/(X)，含其后的尾标点）→ 删除（句尾不占位）；
+    ③ 内嵌单字母标注 → 转占位空白（），符合项目"题干用（）占位"约定。
+    只动单拉丁字母括号，不碰中文括号注（如（含）/（不得轮岗）），后者交由 verify 报残差。
+    """
+    s = stem
+    changed = False
+    new = ANS_NOTE_TAIL_RE.sub('', s)
+    if new != s:
+        changed = True
+        s = new
+    new = TAIL_ANS_BR_RE.sub('', s)
+    if new != s:
+        changed = True
+        s = new
+    new = INLINE_ANS_BR_RE.sub('（）', s)
+    if new != s:
+        changed = True
+        s = new
+    return clean_stem(s), changed
+
 
 
 def extract_judge_answer(line):
@@ -393,6 +427,11 @@ def refine_question(q, sec_type):
                 flags.append('选项超过8个，无法续接')
 
     stem = NUM_LEAD_RE.sub('', clean_stem(' '.join(p for p in stem_parts if p)))
+
+    # 题干去答案标注（母题库统一规则：剥掉题干内嵌的答案字母/说明，用（）占位）
+    stem, ann_cleaned = clean_stem_annotations(stem, options)
+    if ann_cleaned:
+        flags.append('题干去答案标注')
 
     # 选项字母超 H（如 J）时按出现顺序重标为 A-H，并同步答案（考试宝仅支持 A-H）
     if options and any(l not in LETTERS for l, _ in options):
@@ -858,7 +897,7 @@ def cmd_verify(args):
     if fatal:
         print('\n结论：发现 %d 处答案级问题，需人工确认后再构建。' % fatal)
         return 1
-    print('\n结论：未发现答案级问题。其余为题干/选项的文字与切分差异，多数属格式差异或人工清洗漂移，可人工抽查。')
+    print('\n结论：未发现答案级问题。其余为题干/选项的切分差异与少量母题库确定性去标注/重述残差（含无标记的尾部注释、以及母题库在去标注外另做措辞调整者），可人工抽查。')
     return 0
 
 
