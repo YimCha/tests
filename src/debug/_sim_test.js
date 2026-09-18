@@ -298,7 +298,7 @@ ok(recHtml.startsWith('<!DOCTYPE html>'), '写回产物保持完整 HTML 结构'
 recordWrong(0, qa2, false);
 clearRec();
 ok(!__h.pw()[0] && Object.keys(__h.pw()).length===0, '清空记录后全部岗位记录清零');
-ok(localStorage.getItem('srbank_practice_v1')==='{}', '清空后备份同步为空');
+ok(localStorage.getItem('exam_tool_practice_v1')==='{}', '清空后备份同步为空');
 
 // 16) 自动保存句柄身份校验（防复制副本/换版本误写旧文件）
 const fid = __h.fileId();

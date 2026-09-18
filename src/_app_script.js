@@ -1,6 +1,5 @@
-﻿
 /* ================= 状态 ================= */
-const KEY = 'srbank_v1';
+const KEY = 'exam_tool_v1';
 const TYPES = ['单选题','多选题','判断题'];
 const TYPE_SHORT = ['单选','多选','判断'];
 let st = load();
@@ -10,7 +9,7 @@ let view = 'home';
 /* 错题本存储：记录跟随本文件（#bankRec），localStorage 仅作实时冗余备份。
    数据存在 HTML 文件本体里：复制/移动文件即带走记录，不同文件天然独立。
    写回文件经 File System Access API 授权（每次打开一次），授权后当次会话自动保存。 */
-const PKEY = 'srbank_practice_v1';
+const PKEY = 'exam_tool_practice_v1';
 const MASTER_STREAK = 3;   // 连续答对 N 次视为掌握
 const HIGH_FAILS = 2;      // 高频错题阈值（错误次数 >= 此值）
 let recSnap = '';          // 当前文件打开时的记录快照，用于恢复时识别副本
@@ -42,7 +41,7 @@ function pSave(){
 
 /* ---- 写回本文件（File System Access API，Chromium 专属） ---- */
 function recDB(){ return new Promise((res, rej)=>{
-  const req = indexedDB.open('srbank_rec_v1', 1);
+  const req = indexedDB.open('exam_tool_rec_v1', 1);
   req.onupgradeneeded = ()=> req.result.createObjectStore('kv');
   req.onsuccess = ()=> res(req.result);
   req.onerror = ()=> rej(req.error);

@@ -18,16 +18,15 @@
 ## 数据架构
 
 ```
+data/raw_bank/**（各部门原始 Word，终极真值）
+   │  src/import_bank.py（Word COM 抽文本 + 解析 → 母题库初版，人工校对后成为正式母题库）
+   │  src/verify_bank.py（母题库 ↔ 原文逐题比对 → 差异报告 / 更正清单）
+   ▼
 data/master_bank.xlsx（题目，唯一人工编辑入口）
 data/config.xlsx（岗位配置 + 工具元数据，唯一人工编辑入口）
    │  src/bank_loader.py（直读两个 xlsx + 按章节名自动推导岗位归属）
-   ▼
-src/build_bank.py → 离线模拟考试工具 HTML（文件名来自 config「工具配置」）
-
-data/raw_bank/**（各部门原始 Word，终极真值）
-   │  src/verify_bank.py
-   ▼
-与 master_bank.xlsx 逐题比对 → 差异报告 / 更正清单
+   ├─▶ src/build_bank.py → 离线模拟考试工具 HTML（文件名来自 config「工具配置」）
+   └─▶ src/split_by_position.py → 各岗位考试宝导入表（data/by_position/）
 ```
 
 ## 关键约定
@@ -68,16 +67,27 @@ data/raw_bank/**（各部门原始 Word，终极真值）
   映射约定：判断题的「对 / 错」写进选项 A / B，正确答案写字母 A / B；
   选择题答案只写字母、不加分隔符；难度列留空（非必填，题库无此字段）。
 
+* **工具主逻辑以 `src/_app_script.js` 为唯一真源**：`build_bank.py` 构建时把它注入
+  `template.html` 的 `__APP_SCRIPT__` 占位符。不要再直接编辑 template.html 里的脚本
+  （那里只有占位符，改了不会生效）。
+
+* **Word → 母题库** 由 `src/import_bank.py` 完成：章节归属从数据推导
+  （部门 = `raw_bank` 子文件夹名去掉年份与「题库」，类别 = 文件名里的 A/B/C 类），
+  生成 `data/master_bank.imported.xlsx` 初版，**默认不覆盖** `master_bank.xlsx`；
+  差异交给 `verify_bank.py` 核对后人工合并。文本缓存位于 `data/tmp/import_text.json`。
+
 ## 常用命令
 
 ```bash
+python src/import_bank.py     # Word -> 母题库初版（默认 data/master_bank.imported.xlsx，不覆盖母题库）
+python src/import_bank.py --refresh   # 强制重抽 Word 正文（忽略 data/tmp 缓存）
 python src/build_bank.py      # 生成离线模拟考试工具 HTML
 python src/verify_bank.py     # 题库一致性校验：母题库 ↔ 原始 Word 逐题比对（退出码 1 = 有答案级问题）
 python src/verify_bank.py --refresh --excel 核对报告.xlsx   # 重抽原文并输出更正清单
 python src/split_by_position.py            # 按岗位拆分 -> data/by_position/（考试宝导入模板格式）
 python src/split_by_position.py --format plain   # 同上，但用母题库原始列结构
 node src/_test_logic.js       # 组卷比例测试（6 岗位 × 10 次）
-node src/debug/_sim_test.js   # 考试流程测试（62 项断言）
+node src/debug/_sim_test.js   # 考试与刷题流程测试
 ```
 
 ## 依赖
@@ -86,6 +96,7 @@ node src/debug/_sim_test.js   # 考试流程测试（62 项断言）
 
 * Node.js（仅运行测试脚本）
 
-* pywin32（仅 `verify_bank.py` 抽取 Word 原文时需要；缺失时自动退化为「母题库自检」模式，
-  校验缓存位于 `data/tmp/raw_dump.json`）
+* pywin32（`verify_bank.py` 与 `import_bank.py` 抽取 Word 正文时需要；缺失时 verify_bank
+  自动退化为「母题库自检」模式，import_bank 会直接报错。缓存分别在
+  `data/tmp/raw_dump.json` 与 `data/tmp/import_text.json`）
 
