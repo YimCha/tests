@@ -15,7 +15,7 @@
   代码不做硬编码。
 
 * **原始文档是终极真值**：`data/raw_bank/` 下各部门的原始 Word 优先级高于母题库。
-  两者不一致时以原文为准，并跑 `src/verify_bank.py` 找出全部差异。
+  两者不一致时以原文为准，并跑 `src/bank_pipeline.py verify` 找出全部差异。
 
 * **数据质量闸门**：`bank_loader.py` 会直接报错拦截「导入脚本静默截断」的指纹
   （答案为空、多选答案不足 2 个字母、答案字母越界、题干尾部残留答案字母），
@@ -25,7 +25,7 @@
 
 ```
 data/raw_bank/**（各部门原始 Word）
-   │  src/import_bank.py（Word COM 抽文本 → 解析 → 母题库初版，人工校对后成为母题库）
+   │  src/bank_pipeline.py（统一管线：Word COM 抽文本 → 解析 → 母题库初版，并与母题库逐题校验）
    ▼
 data/master_bank.xlsx（题目，唯一人工编辑入口）
 data/config.xlsx（岗位配置 + 工具元数据，唯一人工编辑入口）
@@ -60,12 +60,11 @@ data/config.xlsx（岗位配置 + 工具元数据，唯一人工编辑入口）
 ```
 src/                  # 代码（纯代码，无业务信息）
   bank_loader.py      # 直读 master_bank.xlsx + config.xlsx，组装 BANK 结构 + 岗位自动推导（公共数据源）
-  import_bank.py      # raw_bank 原始 Word -> 母题库初版 Excel（--refresh 重抽；默认不覆盖 master_bank.xlsx）
+  bank_pipeline.py    # 统一管线：raw_bank 原始 Word -> 母题库初版（import）/ 母题库 ↔ 原文逐题校验（verify）
   build_bank.py       # master_bank.xlsx + config.xlsx -> 离线模拟考试 + 刷题练习工具 HTML
   template.html       # 工具模板（含 __BANK_DATA__ / __APP_SCRIPT__ / 标题页脚等占位符，无真实数据）
   _app_script.js      # 工具主逻辑 JS（唯一真源，构建时由 build_bank.py 注入 template.html）
   _test_logic.js      # 组卷比例验证脚本
-  verify_bank.py      # 母题库 ↔ 原始 Word 逐题比对，发现导入脚本的静默错误
   split_by_position.py # 按岗位拆分母题库，默认套考试宝导入模板，输出 data/by_position/<岗位>.xlsx
   debug/
     _sim_test.js      # 考试与刷题流程模拟测试（含 JS 语法校验）
@@ -94,8 +93,8 @@ cp templates/config_template.xlsx      data/config.xlsx
 cp templates/master_bank_template.xlsx data/master_bank.xlsx
 
 # 2) （可选）从各部门原始 Word 题库重新生成「母题库初版」（不覆盖 data/master_bank.xlsx）
-python src/import_bank.py          # -> data/master_bank.imported.xlsx（供 verify_bank 比对后人工合并）
-python src/import_bank.py --refresh   # 强制重抽 Word 正文（默认用 data/tmp 缓存）
+python src/bank_pipeline.py import          # -> data/master_bank.imported.xlsx（供 verify 比对后人工合并）
+python src/bank_pipeline.py import --refresh   # 强制重抽 Word 正文（默认用 data/tmp 缓存）
 
 # 3) 生成离线模拟考试工具（标题/页脚/输出文件名来自 config 的「工具配置」）
 python src/build_bank.py
@@ -103,7 +102,7 @@ python src/build_bank.py
 # 4) 验证
 node src/_test_logic.js     # 组卷比例（6 岗位 × 10 次）
 node src/debug/_sim_test.js # 考试与刷题流程（93 项断言）
-python src/verify_bank.py   # 题库一致性：母题库与 raw_bank 原文逐题比对（退出码 1 = 有答案级问题）
+python src/bank_pipeline.py verify   # 题库一致性：母题库与 raw_bank 原文逐题比对（退出码 1 = 有答案级问题）
 
 # 5) 按岗位拆分母题库（套考试宝导入模板）
 python src/split_by_position.py   # -> data/by_position/<岗位名>.xlsx + 题量汇总.xlsx

@@ -19,8 +19,7 @@
 
 ```
 data/raw_bank/**（各部门原始 Word，终极真值）
-   │  src/import_bank.py（Word COM 抽文本 + 解析 → 母题库初版，人工校对后成为正式母题库）
-   │  src/verify_bank.py（母题库 ↔ 原文逐题比对 → 差异报告 / 更正清单）
+   │  src/bank_pipeline.py（统一管线：Word COM 抽文本 + 解析 → 母题库初版，并与母题库逐题校验）
    ▼
 data/master_bank.xlsx（题目，唯一人工编辑入口）
 data/config.xlsx（岗位配置 + 工具元数据，唯一人工编辑入口）
@@ -57,9 +56,10 @@ data/config.xlsx（岗位配置 + 工具元数据，唯一人工编辑入口）
   答案为空、多选题答案不足 2 个字母、答案字母超出选项范围、题干尾部残留答案字母。
   这些是「导入脚本静默截断」的指纹，务必保持开启。
 
-* **题库更新后跑一次一致性校验**：`python src/verify_bank.py`。
+* **题库更新后跑一次一致性校验**：`python src/bank_pipeline.py verify`。
   它把 `data/raw_bank` 下的原始 Word 与母题库逐题比对，发现答案级不一致时以退出码 1 结束。
   原始文档是唯一真值来源，母题库与它不一致时以原文为准。
+  校验与生成共用同一套解析内核，避免「两套解析器互相漂移」漏检静默错误。
 
 * **岗位分表按考试宝导入模板出**：`python src/split_by_position.py` 默认套用
   `templates/kaoshibaoExcel20221101.xlsx`，只替换数据行（第 3 行起），
@@ -71,19 +71,21 @@ data/config.xlsx（岗位配置 + 工具元数据，唯一人工编辑入口）
   `template.html` 的 `__APP_SCRIPT__` 占位符。不要再直接编辑 template.html 里的脚本
   （那里只有占位符，改了不会生效）。
 
-* **Word → 母题库** 由 `src/import_bank.py` 完成：章节归属从数据推导
+* **Word → 母题库** 由 `src/bank_pipeline.py` 完成（生成与校验合并为同一文件的两个子命令，
+  共用解析内核）：章节归属从数据推导
   （部门 = `raw_bank` 子文件夹名去掉年份与「题库」，类别 = 文件名里的 A/B/C 类），
-  生成 `data/master_bank.imported.xlsx` 初版，**默认不覆盖** `master_bank.xlsx`；
-  差异交给 `verify_bank.py` 核对后人工合并。文本缓存位于 `data/tmp/import_text.json`。
+  `python src/bank_pipeline.py import` 生成 `data/master_bank.imported.xlsx` 初版，
+  **默认不覆盖** `master_bank.xlsx`；`python src/bank_pipeline.py verify` 把初版与母题库
+  逐题比对，差异交人工合并。文本缓存位于 `data/tmp/import_text.json`。
 
 ## 常用命令
 
 ```bash
-python src/import_bank.py     # Word -> 母题库初版（默认 data/master_bank.imported.xlsx，不覆盖母题库）
-python src/import_bank.py --refresh   # 强制重抽 Word 正文（忽略 data/tmp 缓存）
+python src/bank_pipeline.py import     # Word -> 母题库初版（默认 data/master_bank.imported.xlsx，不覆盖母题库）
+python src/bank_pipeline.py import --refresh   # 强制重抽 Word 正文（忽略 data/tmp 缓存）
+python src/bank_pipeline.py verify   # 题库一致性校验：母题库 ↔ 原始 Word 逐题比对（退出码 1 = 有答案级问题）
+python src/bank_pipeline.py verify --refresh --excel 核对报告.xlsx   # 重抽原文并输出更正清单
 python src/build_bank.py      # 生成离线模拟考试工具 HTML
-python src/verify_bank.py     # 题库一致性校验：母题库 ↔ 原始 Word 逐题比对（退出码 1 = 有答案级问题）
-python src/verify_bank.py --refresh --excel 核对报告.xlsx   # 重抽原文并输出更正清单
 python src/split_by_position.py            # 按岗位拆分 -> data/by_position/（考试宝导入模板格式）
 python src/split_by_position.py --format plain   # 同上，但用母题库原始列结构
 node src/_test_logic.js       # 组卷比例测试（6 岗位 × 10 次）
@@ -96,7 +98,6 @@ node src/debug/_sim_test.js   # 考试与刷题流程测试
 
 * Node.js（仅运行测试脚本）
 
-* pywin32（`verify_bank.py` 与 `import_bank.py` 抽取 Word 正文时需要；缺失时 verify_bank
-  自动退化为「母题库自检」模式，import_bank 会直接报错。缓存分别在
-  `data/tmp/raw_dump.json` 与 `data/tmp/import_text.json`）
+* pywin32（`bank_pipeline.py` 抽取 Word 正文时需要；缺失时 `verify` 自动退化为
+  「母题库自检」模式，`import` 会直接报错。文本缓存位于 `data/tmp/import_text.json`）
 
