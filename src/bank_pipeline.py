@@ -74,7 +74,9 @@ OPT_RE = re.compile(r'(?<![A-Za-z])([A-Z])(?:\s*[.、．:：)）]|\s+(?=[\u4e00-
 OPT_LINE_RE = re.compile(r'^\s*([A-ZＡ-Ｚ])\s*[.、．:：)）]')
 ANS_PICK_RE = re.compile(r'[（\[【(]\s*([A-ZＡ-Ｚ][A-ZＡ-Ｚ、，,\s]*?)\s*[）\]】)]')
 ANS_TAIL_RE = re.compile(r'([A-Z])\s*[。．]?\s*$')
-EMPTY_ANS_TAIL_RE = re.compile(r'[（\[【(]\s*[）\]】)]\s*[。．.]?\s*([A-Z]{1,8})\s*[。．]?\s*$')
+# 仅匹配圆括号空占位（如 "（）ABD" 式裸答案）；方括号空占位【 】视为填空占位、不在此吞掉，
+# 改由 ANS_TAIL_RE 抽走其后的答案字母、保留【 】本身（与母题库保留占位一致）。
+EMPTY_ANS_TAIL_RE = re.compile(r'[（(]\s*[）)]\s*[。．.]?\s*([A-Z]{1,8})\s*[。．]?\s*$')
 BARE_MULTI_ANS_RE = re.compile(r'\s([A-Z]{2,8})\s*[。．.]?\s*$')
 INLINE_OPT_RE = re.compile(r'[。．.，,]?\s*([A-Z])\s*[.、．:：)）]\s*([^，。]{1,80})$')
 JUDGE_WORD = r'(正确|错误|对|错|√|×|✓|T|F|是|否)'
@@ -133,14 +135,36 @@ def classify_section(title):
     return None
 
 
+def norm_brackets(s):
+    """仅对空括号/纯空白括号（占位符）做形态统一：半角 () → 全角 （），（ ）→ 无空格 （）。
+    括号内含实际内容者（如 （含）/（LCR）/(2020年修订稿））一律保留原文形态——
+    母题库内容括号本身半角/全角混用（如 (含) 用半角），强行改全角反而与母题库冲突。"""
+    s = re.sub(r'\(\s*\)', '（）', s)     # 半角空括号
+    s = re.sub(r'（\s*）', '（）', s)     # 全角空括号（含内部空格）
+    return s
+
+
+_Q = '"\u201c\u201d\u2018\u2019'
+def strip_wrap_quotes(s):
+    """引号规范化（母题库实测：0 个单元格以引号结尾，3 个仅开头有引号）。
+    - 整段首尾都被引号包裹 → 剥掉整对（原始 Word 把整句用引号裹住的情形）；
+    - 否则只剥【结尾】的错位引号（母题库从不以引号结尾，结尾引号均为 Word 残留），
+      并保留【开头】引号（如 “惠系列”产品… 的开头弯引号是短语引用，母题库保留）。"""
+    s = s.strip('\u3000 ')
+    if len(s) >= 2 and s[0] in _Q and s[-1] in _Q:
+        return s[1:-1].strip('\u3000 ')
+    return re.sub(r'["\u201c\u201d\u2018\u2019]+$', '', s)
+
+
 def strip_option_noise(txt):
-    # 去掉行尾冗余标点与首尾引号（母题库对引号做了人工规范化，去掉可消除绝大部分引号风格差异）。
-    txt = re.sub(r'[。．、]+$', '', txt.strip()).rstrip()
-    return txt.strip('"“”')
+    # 去掉行尾冗余标点（句号/点/顿号/逗号，半角逗号一并处理）与"整段被引号包裹"时的包裹引号。
+    # 母题库题干/选项末尾不带逗号（实测母题库选项/题干末尾逗号计数为 0），故剥离尾部逗号安全无回归。
+    txt = re.sub(r'[。．、，,]+$', '', txt.strip()).rstrip()
+    return norm_brackets(strip_wrap_quotes(txt))
 
 
 def clean_stem(s):
-    return re.sub(r'\s{2,}', ' ', s).strip().strip('"“”\u3000 ')
+    return norm_brackets(strip_wrap_quotes(re.sub(r'\s{2,}', ' ', s).strip()))
 
 
 # 母题库统一规则：把题干里内嵌的正确答案标注剥掉。
@@ -148,7 +172,12 @@ def clean_stem(s):
 # 这与项目约定"题干用（）占位、不写答案"一致。
 ANS_NOTE_TAIL_RE = re.compile(r'\s*答案\s*[:：].*$')                       # 尾部"答案：…"说明
 TAIL_ANS_BR_RE = re.compile(r'[【\[（(]\s*[A-Za-z]\s*[】\]）)]\s*[。．、]?\s*$')  # 尾部单字母标注（含尾标点）
-INLINE_ANS_BR_RE = re.compile(r'[【\[（(]\s*([A-Za-z])\s*[】\]）)]\s*')        # 内嵌单字母标注
+INLINE_ANS_BR_RE = re.compile(r'[【\[（(]\s*([A-Za-z])\s*[】\]）)]\s*')
+
+
+def _inline_br(m):
+    """母题库约定：方头括号【X】整段删除；圆括号（X）留（）占位（字母已抽走）。"""
+    return '' if m.group(0)[0] in '【[' else '（）'        # 内嵌单字母标注
 
 
 def clean_stem_annotations(stem, options):
@@ -169,7 +198,7 @@ def clean_stem_annotations(stem, options):
     if new != s:
         changed = True
         s = new
-    new = INLINE_ANS_BR_RE.sub('（）', s)
+    new = INLINE_ANS_BR_RE.sub(_inline_br, s)
     if new != s:
         changed = True
         s = new
@@ -245,9 +274,18 @@ def extract_pick_answer(line):
             singles = [g for g in groups if len(g[0]) == 1]
             pick = singles if singles else [groups[-1]]
             letters = [g[0] for g in pick]
-            stem = line
-            for g in pick:
-                stem = stem[:g[1].start()] + stem[g[1].end():]
+            # 按母题库约定移除题干内嵌的答案标注，并修复「多标注下标漂移」误删周围文字的 bug：
+            # 用原始行按区间拼接，而非边删边用原下标切。
+            # 母题库对题干里内嵌的答案括号（【X】/（X））统一整段删除（与母题库绝大多数题一致；
+            # 仅极少数题母题库保留了（）占位，属逐题手改、无确定规则，交由 verify 报残差）。
+            spans = sorted((g[1].start(), g[1].end(), line[g[1].start():g[1].end()]) for g in pick)
+            parts, prev = [], 0
+            for a, b, txt in spans:
+                parts.append(line[prev:a])
+                parts.append('')                       # 答案括号整段删除
+                prev = b
+            parts.append(line[prev:])
+            stem = ''.join(parts)
             r = parse_option_line(stem)
             if r is not None:
                 leading, segs = r
@@ -347,9 +385,11 @@ def refine_question(q, sec_type):
                     if n:
                         note = n
                     continue
-            if s.startswith(('解析', '（正确答案', '正确答案')):
+            # 解析 / 正确答案 / 答案：说明行 → 进解析列，不进题干
+            if s.startswith(('解析', '（正确答案', '正确答案', '答案')):
                 note = note or NOTE_PREFIX_RE.sub('', s).strip('（）')
                 continue
+            # 题干续行（极少数判断题题干跨行）
             stem_parts.append(s)
         if answer is None:
             flags.append('未提取到判断题答案')
@@ -438,10 +478,10 @@ def refine_question(q, sec_type):
 
     stem = NUM_LEAD_RE.sub('', clean_stem(' '.join(p for p in stem_parts if p)))
 
-    # 题干去答案标注（母题库统一规则：剥掉题干内嵌的答案字母/说明，用（）占位）
-    stem, ann_cleaned = clean_stem_annotations(stem, options)
-    if ann_cleaned:
-        flags.append('题干去答案标注')
+    # 题干去答案标注（母题库统一规则：剥掉题干内嵌的答案字母/说明）。
+    # 注：该清洗与母题库完全一致（母题库即考试清洗版），故不再写入"需复核"列，
+    # 避免本工具的标记列与母题库空列产生无意义的整列差异。
+    stem, _ = clean_stem_annotations(stem, options)
 
     # 选项字母超 H（如 J）时按出现顺序重标为 A-H，并同步答案（考试宝仅支持 A-H）
     if options and any(l not in LETTERS for l, _ in options):
