@@ -14,6 +14,13 @@
 * **Excel 为唯一编辑入口**：题目在 `master_bank.xlsx`、岗位配置与元数据在 `config.xlsx`，
   代码不做硬编码。
 
+* **原始文档是终极真值**：`data/raw_bank/` 下各部门的原始 Word 优先级高于母题库。
+  两者不一致时以原文为准，并跑 `src/verify_bank.py` 找出全部差异。
+
+* **数据质量闸门**：`bank_loader.py` 会直接报错拦截「导入脚本静默截断」的指纹
+  （答案为空、多选答案不足 2 个字母、答案字母越界、题干尾部残留答案字母），
+  避免错误数据静默流入工具。
+
 ## 数据架构
 
 ```
@@ -54,6 +61,8 @@ src/                  # 代码（纯代码，无业务信息）
   template.html       # 工具模板（含 __BANK_DATA__ / __TOOL_TITLE__ / __FOOTER_*__ 占位符，无真实数据）
   _app_script.js      # 工具主逻辑 JS（与 template.html 同步）
   _test_logic.js      # 组卷比例验证脚本
+  verify_bank.py      # 母题库 ↔ 原始 Word 逐题比对，发现导入脚本的静默错误
+  split_by_position.py # 按岗位拆分母题库，默认套考试宝导入模板，输出 data/by_position/<岗位>.xlsx
   debug/
     _sim_test.js      # 考试与刷题流程模拟测试（含 JS 语法校验）
     _output.json      # build_bank.py 生成的成品文件名（测试脚本据此定位，git 忽略）
@@ -61,11 +70,13 @@ src/                  # 代码（纯代码，无业务信息）
 templates/            # 空模板（提交到仓库，供参与者了解格式）
   config_template.xlsx      # 岗位配置 + 工具配置 + 说明
   master_bank_template.xlsx # 母题库列格式 + 说明
+  kaoshibaoExcel20221101.xlsx # 考试宝批量导入模板（岗位分表按它生成）
 
 data/                 # 题库数据（本地使用，git 忽略，从 templates/ 复制创建）
   master_bank.xlsx    # 母题库，题目唯一人工编辑入口
   config.xlsx         # 岗位配置 + 工具元数据，唯一人工编辑入口
   raw_bank/           # 各部门原始 .doc/.docx（终极真值）
+  by_position/        # 按岗位拆分的考试宝导入表（每岗位一份 + 题量汇总）
   tmp/                # 临时中间产物
   output/             # 运行产物
 
@@ -85,6 +96,10 @@ python src/build_bank.py
 # 3) 验证
 node src/_test_logic.js     # 组卷比例（6 岗位 × 10 次）
 node src/debug/_sim_test.js # 考试与刷题流程（81 项断言）
+python src/verify_bank.py   # 题库一致性：母题库与 raw_bank 原文逐题比对（退出码 1 = 有答案级问题）
+
+# 4) 按岗位拆分母题库（每岗位一份，列结构与母题库一致）
+python src/split_by_position.py   # -> data/by_position/<岗位名>.xlsx + 题量汇总.xlsx
 ```
 
 ## 依赖

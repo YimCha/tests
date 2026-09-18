@@ -13,10 +13,13 @@ JUDGE_MAP = {'对': '对', '是': '对', '正确': '对', '√': '对', '✓': '
              '错': '错', '否': '错', '错误': '错', '×': '错', 'F': '错'}
 TYPE_ID = {'单选题': 0, '多选题': 1, '判断题': 2}
 NUM_PREFIX = re.compile(r'^\d+\s*[.、．]')
+# 题干空括号统一写作全角「（）」；原始文档里混用 （ ）/( )/() 四种写法，这里做输出侧归一化
+BLANK_PAREN = re.compile(r'[（(]\s*[）)]')
 
 
 def clean_stem(s):
     s = NUM_PREFIX.sub('', s or '').strip()
+    s = BLANK_PAREN.sub('（）', s)
     s = re.sub(r'\s+', ' ', s)
     return s
 
@@ -163,6 +166,25 @@ def load_meta():
     return meta
 
 
+def _check_questions(qs, chapters):
+    """题目数据质量闸门：拦住「导入脚本静默截断」这类错误，避免再次流入。
+    历史事故：旧导入脚本的兜底正则只捕获行尾 1 个字母，使「…（）。ABD」被解析成答案 D、
+    题干残留 AB，且不触发当时任何校验。以下三条断言即可拦住该模式。"""
+    LETTERS = 'ABCDEFGH'
+    for q in qs:
+        where = f"「{chapters[q['ch']]}」{q['s'][:26]}"
+        if not q['a']:
+            raise ValueError(f'{where}：缺少正确答案')
+        if q['t'] == 1 and len(q['a']) < 2:
+            raise ValueError(f'{where}：多选题答案不足 2 个选项（{q["a"]!r}），疑似导入时被截断')
+        if q['t'] in (0, 1):
+            for ch in q['a']:
+                if ch not in LETTERS[:len(q['o'])]:
+                    raise ValueError(f'{where}：答案字母 {ch} 超出选项范围 {LETTERS[:len(q["o"])]}')
+            if re.search(r'[A-H]{2,8}\s*[。．]?\s*$', q['s']):
+                raise ValueError(f'{where}：题干尾部残留答案字母，疑似导入时被截断')
+
+
 def load_bank():
     """返回 BANK 结构 {'v', 'positions', 'chapters', 'q', 'meta'}。"""
     positions = load_positions()
@@ -178,6 +200,7 @@ def load_bank():
         q['p'] = positions_for(chapter, positions)
         qs.append(q)
     _check_depts(positions, chapters)
+    _check_questions(qs, chapters)
     return {
         'v': 2,
         'positions': positions,

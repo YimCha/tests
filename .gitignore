@@ -10,3 +10,6 @@ src/debug/_output.json
 # Python 缓存
 __pycache__/
 *.pyc
+
+# 工作区记忆（含业务信息，不提交）
+.workbuddy/
