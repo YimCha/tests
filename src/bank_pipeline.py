@@ -587,6 +587,59 @@ def write_excel(out_path, rows):
     wb.save(out_path)
 
 
+# ===================== export：把母题库(或任意 xlsx)完整读回并导出 =====================
+def export_master(in_path, out_dir):
+    """把 xlsx（默认母题库）完整读回，导出为 JSON（结构化）与文本（可读）两份。
+
+    注意：这是从 xlsx 直接读回，不是从 Word 重新解析，故 100% 忠实、零损耗。
+    用途：① 完整输出母题库内容供人工核对；② 证明代码完全理解并能复现母题库数据结构。
+    """
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    wb = openpyxl.load_workbook(in_path, read_only=True)
+    ws = wb[wb.sheetnames[0]]
+    rows = list(ws.iter_rows(values_only=True))
+    headers = [str(h).strip() if h is not None else '列%d' % i for i, h in enumerate(rows[0])]
+    records = []
+    for r in rows[1:]:
+        if not any(c is not None and str(c).strip() for c in (r or [])):
+            continue
+        rec = {headers[i]: ('' if r[i] is None else str(r[i]).strip()) for i in range(len(headers))}
+        records.append(rec)
+
+    json_path = out_dir / 'master_export.json'
+    json_path.write_text(json.dumps(records, ensure_ascii=False, indent=1), encoding='utf-8')
+
+    txt_path = out_dir / 'master_export.txt'
+    lines = []
+    for i, rec in enumerate(records, 1):
+        lines.append('#%d [%s][源%s][%s]' % (i, rec.get('章节', ''), rec.get('源题号', ''), rec.get('题型', '')))
+        lines.append('题干: ' + rec.get('题干', ''))
+        for c in LETTERS:
+            v = rec.get('选项' + c)
+            if v:
+                lines.append('  %s. %s' % (c, v))
+        ans = rec.get('正确答案', '')
+        lines.append('答案: ' + ans)
+        if rec.get('解析'):
+            lines.append('解析: ' + rec.get('解析'))
+        if rec.get('需复核'):
+            lines.append('需复核: ' + rec.get('需复核'))
+        lines.append('')
+    txt_path.write_text('\n'.join(lines), encoding='utf-8')
+    return len(records), json_path, txt_path
+
+
+def cmd_export(args):
+    if not Path(args.inp).exists():
+        sys.exit('缺少输入文件：%s' % args.inp)
+    n, jp, tp = export_master(args.inp, args.out)
+    print('已导出 %d 题 ->' % n)
+    print('  JSON : %s' % jp)
+    print('  文本 : %s' % tp)
+    return 0
+
+
 def to_row(chapter, q):
     """结构化记录 -> Excel 行（判断题选项固定为 对/错）。"""
     sec = q['sec_type']
@@ -926,6 +979,11 @@ def main():
     pv.add_argument('--excel', metavar='PATH', help='把更正清单输出为 xlsx')
     pv.add_argument('--ge', type=float, default=0.70, help='题干匹配阈值，默认 0.70')
     pv.set_defaults(func=cmd_verify)
+
+    pe = sub.add_parser('export', help='把母题库(或任意 xlsx)完整读回并导出为 JSON + 可读文本')
+    pe.add_argument('--in', dest='inp', default=str(MASTER), help='输入 xlsx（默认 data/master_bank.xlsx）')
+    pe.add_argument('--out', default=str(DATA / 'tmp'), help='输出目录（默认 data/tmp）')
+    pe.set_defaults(func=cmd_export)
 
     args = ap.parse_args()
     return args.func(args)
