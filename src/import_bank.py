@@ -296,8 +296,8 @@ def refine_question(q, sec_type):
         else:
             stem_parts.append(first)
 
-        for ln in lines[1:]:
-            s = ln.strip()
+        for idx in range(1, len(lines)):
+            s = lines[idx].strip()
             if not s:
                 continue
             if s.startswith(('解析', '（正确答案', '正确答案', '答案')):
@@ -323,6 +323,15 @@ def refine_question(q, sec_type):
                     for letter, txt in tail_opts:
                         options.append((letter, strip_option_noise(txt)))
                     continue
+            # 跨行续写识别：本行不是选项行，且下一行以「尚未占用的选项字母」开头
+            # ⇒ 本行是上一个选项的排版换行，应并入上一个选项而不是新开一个。
+            used = {l for l, _ in options}
+            nxt = norm_fw(lines[idx + 1].strip()) if idx + 1 < len(lines) else ''
+            nxt_opt = OPT_LINE_RE.match(nxt)
+            if (options and len(s) <= 20 and not re.search(r'[。．；;）)]$', s)
+                    and nxt_opt and norm_fw(nxt_opt.group(1)) not in used):
+                options[-1] = (options[-1][0], options[-1][1] + s)
+                continue
             letter = next_letter()
             if letter:
                 options.append((letter, strip_option_noise(s)))
