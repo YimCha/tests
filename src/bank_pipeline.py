@@ -178,12 +178,22 @@ def clean_stem_annotations(stem, options):
 
 
 def extract_judge_answer(line):
-    """抽取判断题答案，返回 (答案'对'/'错' 或 None, 去掉答案的题干, 括号内补充说明)"""
+    """抽取判断题答案，返回 (答案'对'/'错' 或 None, 去掉答案的题干, 解析说明)。
+
+    注意：判断题答案标记（如（错误））是题干的终结符，其【之后】的文字是解析说明，
+    绝不可并入题干。早期实现把标记前后文本拼回题干，导致解析被误并进题干（重复计入解析列），
+    与母题库「题干干净、解析单列」不一致。这里只取标记之前的文本作题干，之后的作解析。
+    """
     m = ANS_JUDGE_RE.search(line)
     if m:
         ans = JUDGE_CANON[norm_fw(m.group(1))]
-        stem = TRAIL_EMPTY_PAREN_RE.sub('', line[:m.start()] + line[m.end():]).rstrip()
-        return ans, stem, line[m.end():].strip()
+        stem = TRAIL_EMPTY_PAREN_RE.sub('', line[:m.start()]).rstrip()
+        note = line[m.end():].strip()
+        # 答案标记之后若整段被括号包住（如（不得轮岗）），取括号内文本作为解析，与母题库一致
+        nm = re.match(r'^[（(]([^（）()]*)[）)]\s*$', note)
+        if nm:
+            note = nm.group(1).strip()
+        return ans, stem, note
     m2 = ANS_JUDGE_PLAIN_RE.search(line)
     if m2:
         ans = JUDGE_CANON[norm_fw(m2.group(1))]
@@ -744,7 +754,7 @@ def write_excel_report(path, selfbad, diffs, unpaired, orphan, skipped):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = '更正清单'
-    ws.append(['级别', '问题类型', '章节', '源题号', '题型', '母题库行', '字段', '当前值', '应为', '说明'])
+    ws.append(['级别', '问题类型', '章节', '源题号', '题型', '母题库行', '字段', '母题库', '导入初版(代码)', '说明'])
     for m in selfbad['缺少正确答案']:
         ws.append(['严重', '缺少正确答案', m['chapter'], m['num'], T2NAME[m['type']], m['row'],
                    '正确答案', '', '', '母题库自检'])
