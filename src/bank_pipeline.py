@@ -98,7 +98,11 @@ TAIL_ANS = re.compile(r'([A-Z]{1,8})\s*[。．]?\s*$')
 NOTE_LINE = re.compile(r'^\s*[（(]?\s*(解析|【解析】|正确答案|答案)\s*[:：为]?\s*(.*?)\s*[）)]?\s*$')
 EMPTY_PAREN = re.compile(r'[（(\[【]\s*[）)\]】]')
 BLANK_PAREN = re.compile(r'[（(]\s*[）)]')
-OPT_PREFIX = re.compile(r'^\s*[A-Z]\s*[.、．:：)）]?\s*')
+# verify 自检用：选项开头"真·乱入字母前缀"（如 "A发放"/"A.发放"/"A 发放"）。
+# 仅在"字母(+可选标点/空白)后紧跟中文"时才算；英文缩写开头(TCP/IP/UPS/RAM/SELECT…)、
+# 单字母选项(S/H/C/R)、信用等级写法(X级，如 C级/D级 字母是内容一部分)均非乱入，排除。
+# 与 normalize_master.py 的 STRAY_PREFIX 对齐，避免把合法英文缩写误报为"残留字母前缀"。
+OPT_PREFIX = re.compile(r'^[A-Za-z](?!级)[.、．:：)）]?\s*(?=[\u4e00-\u9fff\u3400-\u4dbf])')
 KW = r'(单项选择题|多项选择题|不定项选择题|判断题|填空题|简答题|问答题|论述题|计算题|单选题|多选题|选择题|单项选择|多项选择|不定项|单选|多选|判断)'
 
 
@@ -742,7 +746,7 @@ def self_check(master):
         if NUM_RE.match(s):
             bad['题干残留数字序号'].append(m)
         for i, o in enumerate(m['opts']):
-            if o and (OPT_PREFIX.match(o) or re.match(r'^\s*[A-Z]\s+\S', o)):
+            if o and OPT_PREFIX.match(o):
                 bad['选项残留字母前缀'].append(m)
                 break
         if '答案' in s:
