@@ -297,9 +297,9 @@ def extract_pick_answer(line):
             if tail:
                 return letters, stem[:tail.start()].rstrip('。．'), [(tail.group(1), tail.group(2).strip())]
             return letters, stem, []
-    m0 = EMPTY_ANS_TAIL_RE.search(line)          # 先处理「（）ABD」式裸答案
+    m0 = EMPTY_ANS_TAIL_RE.search(line)          # 空括号（填空位）+ 紧随的答案字母：保留（）壳，仅抽字母
     if m0:
-        return list(m0.group(1)), line[:m0.start()].rstrip(), []
+        return list(m0.group(1)), (line[:m0.start()] + '（）').rstrip(), []
     m1 = BARE_MULTI_ANS_RE.search(line)          # 句中裸多字母答案（≥2 个字母，避免误伤单个字母结尾）
     if m1:
         return list(m1.group(1)), line[:m1.start()].rstrip(), []
