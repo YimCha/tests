@@ -90,6 +90,7 @@ JUDGE_CANON = {'对': '对', '是': '对', '正确': '对', '√': '对', '✓':
 
 NOTE_PREFIX_RE = re.compile(r'^(解析|（?正确答案）?|答案)\s*[:：]?\s*[为是]?\s*')
 TRAIL_EMPTY_PAREN_RE = re.compile(r'\s*[（\[【(]\s*[）\]】)]\s*$')
+TRAIL_EMPTY_SQUARE_RE = re.compile(r'\s*[【\[]\s*[】\]]]\s*$')  # 仅删尾部空方括号；圆空括号留壳（统一规则）
 
 # verify 专用：母题库自检 / 比对归一化
 BRACKET = re.compile(r'[（(\[【]\s*([A-Z][A-Z\s、，,]{0,8}?)\s*[）)\]】]')
@@ -216,7 +217,7 @@ def extract_judge_answer(line):
     m = ANS_JUDGE_RE.search(line)
     if m:
         ans = JUDGE_CANON[norm_fw(m.group(1))]
-        stem = TRAIL_EMPTY_PAREN_RE.sub('', line[:m.start()]).rstrip()
+        stem = TRAIL_EMPTY_SQUARE_RE.sub('', line[:m.start()]).rstrip()
         note = line[m.end():].strip()
         # 答案标记之后若整段被括号包住（如（不得轮岗）），取括号内文本作为解析，与母题库一致
         nm = re.match(r'^[（(]([^（）()]*)[）)]\s*$', note)
@@ -226,11 +227,11 @@ def extract_judge_answer(line):
     m2 = ANS_JUDGE_PLAIN_RE.search(line)
     if m2:
         ans = JUDGE_CANON[norm_fw(m2.group(1))]
-        return ans, TRAIL_EMPTY_PAREN_RE.sub('', line[:m2.start()]).rstrip(), ''
+        return ans, TRAIL_EMPTY_SQUARE_RE.sub('', line[:m2.start()]).rstrip(), ''
     m3 = ANS_JUDGE_NOTE_RE.search(line)
     if m3:
         ans = JUDGE_CANON[norm_fw(m3.group(1))]
-        stem = TRAIL_EMPTY_PAREN_RE.sub('', line[:m3.start()]).rstrip()
+        stem = TRAIL_EMPTY_SQUARE_RE.sub('', line[:m3.start()]).rstrip()
         nm = re.search(r'[（\[【(]([^）\]】)]*)[）\]】)]\s*$', line[m3.start():])
         return ans, stem, (nm.group(1).strip() if nm else '')
     return None, line, ''
@@ -282,7 +283,8 @@ def extract_pick_answer(line):
             parts, prev = [], 0
             for a, b, txt in spans:
                 parts.append(line[prev:a])
-                parts.append('')                       # 答案括号整段删除
+                # 统一规则：圆括号答案标注（X）留空壳（）；方括号【X】整段删除（与母题库约定一致）
+                parts.append('（）' if txt[0] in '（(' else '')
                 prev = b
             parts.append(line[prev:])
             stem = ''.join(parts)
