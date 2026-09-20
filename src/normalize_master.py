@@ -4,7 +4,9 @@
 
 规则（由人工与脚本逐类核对后确定，见 data/tmp/audit_master_report.xlsx）：
   A. 判断题题干尾句号补齐 —— 对齐 207/226 多数派（无句号则补 。）
-  B. 直引号 " ' 转全角弯引号 “ ” ‘ ’（成对转换；奇数引号不改并标记需人工）
+  B. 直引号 " ' 转全角弯引号 “ ” ‘ ’（成对转换；奇数引号先补闭合再转，见 E）
+  E. 奇数直引号补闭合（源数据漏收尾引号，末尾补闭合后统一转弯引号；不增删原意）
+  F. 清理“壳前后双句号”（。（）。→。（），仅删壳后多余句号，不增删原意；适用于单选题题干等）
   C. 选项开头多余单字母前缀剥离（授信审批部B类[5] 的 C级/D级 为合法信用等级，例外保留）
   D. 圆括号答案标注统一留空壳（）——以修复后的 import 产物为基准，凡是母题库与它仅缺
      （）之差者，自动补壳（去答案字母、留（）占位）；方括号【X】维持删除。不篡改原意。
@@ -71,12 +73,25 @@ OPTION_COLS = {'选项A', '选项B', '选项C', '选项D', '选项E', '选项F',
 # 规则实现
 # ---------------------------------------------------------------------------
 def add_judge_period(stem):
-    """判断题题干补尾句号。返回 (新值, 是否改动)。"""
-    s = (stem or '').rstrip()
-    if s.endswith('。'):
-        # 已合规；若原值仅是尾部空白差异，仍按原值返回（不改）
-        return stem, False
-    return s + '。', True
+    """判断题题干补尾句号（壳感知，避免重复句号）。返回 (新值, 是否改动)。
+
+    句号应位于正文末尾、（）空壳占位之前：
+      · 正文已以“。”结尾 → 不动；
+      · 末尾为“（）”而正文缺句号 → 补在壳前；
+      · 修复历史误加的“壳后多余句号”（如 “...。（）。” → “...。（）”）。“”
+    """
+    s = (stem or '').strip()
+    # 修复历史误加：若“（）”后还跟句号（壳后多余句号），去掉该句号
+    s = re.sub(r'（）\s*。', '（）', s)
+    # 提取并暂存末尾空壳（）
+    m = re.search(r'\s*（）\s*$', s)
+    shell = m.group(0) if m else ''
+    core = s[:len(s) - len(shell)] if shell else s
+    core = core.rstrip()
+    if not core.endswith('。'):
+        core = core + '。'
+    new = core + shell
+    return new, new != (stem or '')
 
 
 def to_curly(s):
@@ -97,6 +112,21 @@ def to_curly(s):
         else:
             out.append(ch)
     return ''.join(out), True, False
+
+
+def close_odd_quotes(s):
+    """奇数个直引号：在末尾补闭合引号（源数据漏闭合，最常见是整句/整词缺收尾引号）。
+
+    仅补闭合、不增删其它内容，原意不变；随后由 to_curly 统一转弯引号。若某类引号仍为奇数
+    （理论上补后不会再奇数），交由 to_curly 标记需人工。
+    """
+    if s is None:
+        return s
+    if s.count('"') % 2 == 1:
+        s = s + '"'
+    if s.count("'") % 2 == 1:
+        s = s + "'"
+    return s
 
 
 def strip_prefix(s, key):
@@ -202,14 +232,18 @@ def normalize_cell(col, val, rowkey, qtype, imp_val=None):
             new = n
             changes.append(('A-判断题补句号', ''))
 
-    # 规则 B：直引号转弯引号（题干/选项/解析）
+    # 规则 B/E：先补闭合引号（奇数直引号→末尾补），再统一转弯引号（题干/选项/解析）
     if col in SCAN_COLS:
-        n, ch, is_manual = to_curly(new)
+        closed = close_odd_quotes(new)
+        n, ch, is_manual = to_curly(closed)
         if is_manual:
             manual.append((col, '直引号奇数/不配对，未自动改，需人工决定'))
         elif ch:
+            if closed != new:
+                changes.append(('E-补闭合引号并转弯引号', '奇数直引号末尾补闭合后转全角弯引号'))
+            else:
+                changes.append(('B-直引号转弯引号', ''))
             new = n
-            changes.append(('B-直引号转弯引号', ''))
 
     # 规则 C：选项多余字母前缀
     if col in OPTION_COLS:
@@ -217,6 +251,14 @@ def normalize_cell(col, val, rowkey, qtype, imp_val=None):
         if ch:
             new = n
             changes.append(('C-去选项前缀', ''))
+
+    # 规则 F：清理“壳前后双句号”（如 “...开支。（）。” → “...开支。（）”）——
+    # 仅删壳后多余句号，不增删其它内容；仅当“壳前已有句号且壳后还有句号”时触发（单选题题干等也可能出现）。
+    if col in SCAN_COLS:
+        n = re.sub(r'(。)\s*（）\s*。', r'\1（）', new)
+        if n != new:
+            new = n
+            changes.append(('F-清理壳后多余句号', ''))
 
     # 规则 D：圆括号答案标注统一留空壳（）
     # 以修复后的 import 产物为基准：若母题库与它在（）之外完全一致、仅壳数不同——
