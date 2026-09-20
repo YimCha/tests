@@ -228,8 +228,9 @@ function render(){
   else if(view==='exam') html = vExam();
   else if(view==='practice') html = vPractice();
   else if(view==='wrong') html = vWrong();
+  else if(view==='draw') html = vDraw();
   app.innerHTML = html;
-  app.classList.toggle('wide', (view==='exam' && !exam) || view==='practice' || view==='wrong');
+  app.classList.toggle('wide', (view==='exam' && !exam) || view==='practice' || view==='wrong' || view==='draw');
   if(view==='exam' && exam) drawExam();
   if(view==='practice' && practice && !practice.done) drawPractice();
   bindGlobal();
@@ -244,7 +245,8 @@ function setMode(m){ st.mode=m; save(); render(); }
 /* ================= 首页 ================= */
 function vHome(){
   const tabs = [['exam','模拟考试'],['practice','刷题练习'],['wrong','错题本']].map(t=>
-    `<button class="top-tab ${st.mode===t[0]?'on':''}" onclick="setMode('${t[0]}')">${t[1]}</button>`).join('');
+    `<button class="top-tab ${st.mode===t[0]?'on':''}" onclick="setMode('${t[0]}')">${t[1]}</button>`).join('')
+    + `<button class="top-tab tab-far" onclick="dzEnter()">抽签</button>`;
   const title = {exam:'请选择考试岗位', practice:'选择岗位 · 刷题练习', wrong:'选择岗位 · 错题本'}[st.mode];
   let cards;
   if(st.mode==='wrong'){
@@ -1134,6 +1136,705 @@ function qCard(qi, o){
   </div>`;
 }
 function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ================= 抽签 =================
+   名单只保存在本机浏览器(localStorage)，不写回 HTML 文件，也不上传任何服务器。
+   抽签用 crypto.getRandomValues 做无放回等概率抽取：名单顺序不影响结果，每人中签概率相同。 */
+const DKEY = 'exam_tool_draw_v1';
+const DZ_SPEED = {fast:420, mid:780, slow:1150};
+const DZ_NAME_RE = /姓名|名字|人员|员工|职工/;
+const DZ_NO_RE = /工号|编号|账号|员工号|职工号/;
+const DZ_RID = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const DZ_ROUND_LABEL = {floor:'向下取整', ceil:'向上取整', round:'四舍五入'};
+
+let dr = dzLoad();
+let dz = null;          // 运行时状态：列映射中 或 抽签进行中
+let dzPaste = false;    // 粘贴面板是否展开
+let dzToken = 0;        // 抽签序列令牌，用于终止上一轮揭晓动画
+let dzToastT = 0;
+
+function dzLoad(){
+  const def = {roster:[], pct:30, rounding:'floor', fname:'', speed:'mid'};
+  try{
+    const d = JSON.parse(localStorage.getItem(DKEY));
+    if(d && typeof d === 'object'){
+      const r = Object.assign({}, def, d);
+      if(!Array.isArray(r.roster)) r.roster = [];
+      if(!DZ_SPEED[r.speed]) r.speed = 'mid';
+      if(!DZ_ROUND_LABEL[r.rounding]) r.rounding = 'floor';
+      const p = +r.pct;
+      r.pct = (isFinite(p) && p > 0 && p <= 100) ? p : 30;
+      r.roster = r.roster.filter(x=>x && typeof x.n === 'string' && x.n).map(x=>({n:x.n, no:String(x.no == null ? '' : x.no)}));
+      return r;
+    }
+  }catch(e){}
+  return def;
+}
+function dzSave(){
+  try{ localStorage.setItem(DKEY, JSON.stringify({roster:dr.roster, pct:dr.pct, rounding:dr.rounding, fname:dr.fname, speed:dr.speed})); }
+  catch(e){ dzToast('名单较大，本地存储写入失败，下次打开需重新导入'); }
+}
+function dzToast(msg){
+  let el = document.getElementById('dzToast');
+  if(!el){ el = document.createElement('div'); el.id = 'dzToast'; document.body.appendChild(el); }
+  el.className = 'dz-toast';
+  el.textContent = msg;
+  clearTimeout(dzToastT);
+  dzToastT = setTimeout(()=>{ el.className = 'dz-toast off'; }, 2400);
+}
+
+/* ---- 列号 <-> 列名 ---- */
+function dzColIdx(s){
+  let n = 0;
+  for(let i=0;i<s.length;i++){ const c = s.charCodeAt(i); if(c < 65 || c > 90) continue; n = n*26 + (c-64); }
+  return n - 1;
+}
+function dzColName(i){
+  let s = ''; i = i + 1;
+  while(i > 0){ s = String.fromCharCode(65 + ((i-1) % 26)) + s; i = Math.floor((i-1) / 26); }
+  return s;
+}
+
+/* ---- 极简 xlsx 读取：ZIP 中央目录 + 原生 deflate-raw 解压 + DOMParser ---- */
+async function dzUnzip(buf, want){
+  const u8 = new Uint8Array(buf), dv = new DataView(buf), dec = new TextDecoder('utf-8');
+  let eocd = -1;
+  const stop = Math.max(0, u8.length - 66000);
+  for(let i = u8.length - 22; i >= stop; i--){ if(dv.getUint32(i, true) === 0x06054b50){ eocd = i; break; } }
+  if(eocd < 0) throw new Error('不是有效的 xlsx 文件');
+  const cnt = dv.getUint16(eocd + 10, true);
+  let off = dv.getUint32(eocd + 16, true);
+  const out = {};
+  for(let i=0;i<cnt;i++){
+    if(off + 46 > u8.length || dv.getUint32(off, true) !== 0x02014b50) throw new Error('xlsx 压缩包头损坏');
+    const method = dv.getUint16(off + 10, true);
+    const csize  = dv.getUint32(off + 20, true);
+    const fnLen  = dv.getUint16(off + 28, true);
+    const exLen  = dv.getUint16(off + 30, true);
+    const cmLen  = dv.getUint16(off + 32, true);
+    const lho    = dv.getUint32(off + 42, true);
+    const name   = dec.decode(u8.subarray(off + 46, off + 46 + fnLen));
+    off += 46 + fnLen + exLen + cmLen;
+    if(want && !want.test(name)) continue;
+    if(lho + 30 > u8.length) throw new Error('xlsx 压缩包头越界');
+    const lFn = dv.getUint16(lho + 26, true), lEx = dv.getUint16(lho + 28, true);
+    const ds = lho + 30 + lFn + lEx;
+    out[name] = {method, raw: u8.subarray(ds, Math.min(ds + csize, u8.length))};
+  }
+  for(const k in out){
+    const it = out[k];
+    if(it.method === 0){ out[k] = dec.decode(it.raw); }
+    else if(it.method === 8){
+      if(!it.raw.length){ out[k] = ''; continue; }
+      const st = new Blob([it.raw]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      out[k] = await new Response(st).text();
+    }
+    else { throw new Error('xlsx 使用了不支持的压缩方式'); }
+  }
+  return out;
+}
+function dzXml(s, what){
+  if(!s) throw new Error('xlsx 缺少 ' + what);
+  const d = new DOMParser().parseFromString(s, 'application/xml');
+  if(d.getElementsByTagName('parsererror').length) throw new Error('xlsx 内部 ' + what + ' 解析失败');
+  return d;
+}
+function dzShared(xml){
+  const out = [];
+  if(!xml) return out;
+  const doc = dzXml(xml, 'sharedStrings');
+  Array.prototype.forEach.call(doc.getElementsByTagName('si'), si=>{
+    let t = '';
+    Array.prototype.forEach.call(si.getElementsByTagName('t'), x=>{ t += x.textContent; });
+    out.push(t);
+  });
+  return out;
+}
+function dzSheet(xml, shared){
+  const doc = dzXml(xml, 'sheet'), rows = [];
+  Array.prototype.forEach.call(doc.getElementsByTagName('row'), (r, idx)=>{
+    const ri = (+r.getAttribute('r') || idx + 1) - 1;
+    const cells = [];
+    Array.prototype.forEach.call(r.getElementsByTagName('c'), c=>{
+      const ci = dzColIdx(c.getAttribute('r') || '');
+      if(ci < 0) return;
+      const t = c.getAttribute('t') || 'n';
+      let v = '';
+      if(t === 'inlineStr'){
+        const is = c.getElementsByTagName('is')[0];
+        if(is) Array.prototype.forEach.call(is.getElementsByTagName('t'), x=>{ v += x.textContent; });
+      } else {
+        const vn = c.getElementsByTagName('v')[0];
+        if(vn){
+          v = vn.textContent;
+          if(t === 's'){ const k = +v; v = (k >= 0 && k < shared.length) ? shared[k] : ''; }
+        }
+      }
+      cells[ci] = v;
+    });
+    rows[ri] = cells;
+  });
+  for(let i=0;i<rows.length;i++) if(!rows[i]) rows[i] = [];
+  return rows;
+}
+async function dzReadXlsx(file){
+  if(typeof DecompressionStream === 'undefined') throw new Error('当前浏览器不支持解压 xlsx，请改用粘贴文本导入');
+  const files = await dzUnzip(await file.arrayBuffer(),
+    /^xl\/(workbook\.xml|_rels\/workbook\.xml\.rels|sharedStrings\.xml|worksheets\/sheet\d+\.xml)$/);
+  const wb = dzXml(files['xl/workbook.xml'], 'workbook');
+  const relMap = {};
+  if(files['xl/_rels/workbook.xml.rels']){
+    Array.prototype.forEach.call(dzXml(files['xl/_rels/workbook.xml.rels'], 'rels').getElementsByTagName('Relationship'), r=>{
+      relMap[r.getAttribute('Id')] = r.getAttribute('Target');
+    });
+  }
+  const shared = dzShared(files['xl/sharedStrings.xml']);
+  const sheets = [];
+  Array.prototype.forEach.call(wb.getElementsByTagName('sheet'), (s, i)=>{
+    const rid = s.getAttribute('r:id') || s.getAttributeNS(DZ_RID, 'id');
+    let tgt = relMap[rid] || ('worksheets/sheet' + (i+1) + '.xml');
+    tgt = tgt.replace(/^\/?xl\//, '').replace(/^\//, '');
+    const p = 'xl/' + tgt;
+    if(files[p]) sheets.push({name: s.getAttribute('name') || ('工作表' + (i+1)), rows: dzSheet(files[p], shared)});
+  });
+  if(!sheets.length) throw new Error('xlsx 里没有找到可读的工作表');
+  return sheets;
+}
+
+/* ---- 名单导入 ---- */
+function dzPickFile(){
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.xlsx';
+  inp.onchange = async ()=>{
+    const f = inp.files && inp.files[0];
+    if(!f) return;
+    if(!/\.xlsx$/i.test(f.name)){
+      alert('只支持 .xlsx 格式。\n\n如果名单是 .xls 老格式，请用 Excel 或 WPS「另存为」.xlsx；也可以直接框选表格复制，用「粘贴」进来。');
+      return;
+    }
+    try{
+      const sheets = await dzReadXlsx(f);
+      dz = {mode:'map', fname:f.name, sheets:sheets, si:0, colName:0, colNo:-1, head:1, err:''};
+      dzAutoMap(sheets[0].rows);
+      render();
+    }catch(e){
+      alert('读取失败：' + ((e && e.message) || e) + '\n\n可以改用「粘贴」导入。');
+    }
+  };
+  inp.click();
+}
+/* 约定：第一行是标题行，数据从第二行开始。按标题文字认列——不让用户手选。
+   先认工号（「员工编号」这类同时含「员工」「编号」的标题，应算工号列）。 */
+function dzAutoMap(rows){
+  dz.head = 2;
+  const t = rows[0] || [];
+  let nameC = -1, noC = -1;
+  for(let c=0;c<t.length;c++){
+    const v = String(t[c] == null ? '' : t[c]).trim();
+    if(!v) continue;
+    if(noC < 0 && DZ_NO_RE.test(v)) noC = c;
+    else if(nameC < 0 && DZ_NAME_RE.test(v)) nameC = c;
+  }
+  dz.colName = nameC;
+  dz.colNo = noC;
+  dz.autoOk = nameC >= 0 && noC >= 0;
+}
+function dzMaxCols(rows){
+  let m = 0;
+  for(let i=0;i<rows.length;i++){ const r = rows[i]; if(r && r.length > m) m = r.length; }
+  return Math.min(Math.max(m, 2), 26);
+}
+function dzCountValid(rows, head, cn, cno){
+  const start = Math.max(0, (head | 0) - 1);
+  let n = 0;
+  for(let i=start;i<rows.length;i++){
+    const r = rows[i] || [];
+    if(String(r[cn] == null ? '' : r[cn]).trim() && String(r[cno] == null ? '' : r[cno]).trim()) n++;
+  }
+  return n;
+}
+function dzSetSheet(v){ dz.si = +v; dzAutoMap(dz.sheets[dz.si].rows); render(); }
+function dzCancelMap(){ dz = null; render(); }
+function dzConfirmMap(){
+  const rows = dz.sheets[dz.si].rows;
+  const start = Math.max(0, (dz.head | 0) - 1);
+  const list = [], byNo = {}, dup = [];
+  let half = 0;
+  for(let i=start;i<rows.length;i++){
+    const r = rows[i] || [];
+    const name = String(r[dz.colName] == null ? '' : r[dz.colName]).trim();
+    const no = String(r[dz.colNo] == null ? '' : r[dz.colNo]).trim();
+    if(!name && !no) continue;
+    if(!name || !no){ half++; continue; }              // 姓名或工号缺一个的行不计入
+    if(byNo[no] !== undefined){ if(dup.indexOf(no) < 0) dup.push(no); continue; }
+    byNo[no] = 1;
+    list.push({n:name, no:no});
+  }
+  if(dup.length){
+    dz.err = '工号有重复：' + dup.slice(0, 8).map(esc).join('、') +
+      (dup.length > 8 ? ' 等共 ' + dup.length + ' 个' : '') + '。请修改名单后重新上传。';
+    render();
+    return;
+  }
+  if(!list.length){ dz.err = '没有识别到名单，检查一下上面选的列对不对。'; render(); return; }
+  dr.roster = list;
+  dr.fname = dz.fname;
+  dzSave();
+  const msg = '已导入 ' + list.length + ' 人' + (half ? '，跳过 ' + half + ' 行缺项的' : '');
+  dz = null;
+  render();
+  dzToast(msg);
+}
+function dzTogglePaste(){ dzPaste = !dzPaste; render(); }
+/* 粘贴的名单不限定列序：哪一列像工号（不含中文）就按工号处理。 */
+function dzPasteApply(){
+  const ta = document.getElementById('dzPasteBox');
+  if(!ta) return;
+  const rows = ta.value.split(/\r?\n/).map(s=>s.trim()).filter(s=>s)
+    .map(ln=>ln.split(/\t|,|，|;|；/).map(s=>s.trim()))
+    .filter(r=>r.length > 1);
+  if(!rows.length){ alert('每行需要有姓名和工号两列。\n\n直接从 Excel 复制整行粘贴即可。'); return; }
+  const isHeader = v => /^(工号|员工号|职工号|编号|姓名|名字|人员|员工姓名)$/.test(v);
+  const body = rows.filter(r=>!isHeader(r[0]) && !isHeader(r[1]));
+  const looksNo = i => body.length > 0 && body.every(r=>r[i] && !/[\u4e00-\u9fa5]/.test(r[i]));
+  let ci = 0, cn = 1;
+  if(!looksNo(0) && looksNo(1)){ ci = 1; cn = 0; }
+  const list = [], byNo = {}, dup = [];
+  body.forEach(r=>{
+    const no = r[ci] || '', name = r[cn] || '';
+    if(!no || !name) return;
+    if(byNo[no] !== undefined){ if(dup.indexOf(no) < 0) dup.push(no); return; }
+    byNo[no] = 1;
+    list.push({n:name, no:no});
+  });
+  if(dup.length){
+    alert('工号有重复：' + dup.slice(0, 8).join('、') + (dup.length > 8 ? ' 等共 ' + dup.length + ' 个' : '') + '\n\n请修改后再导入。');
+    return;
+  }
+  if(!list.length){ alert('没有识别到名单，请确认每行都有姓名和工号。'); return; }
+  dr.roster = list; dr.fname = '粘贴导入'; dzPaste = false; dzSave(); render();
+  dzToast('已导入 ' + list.length + ' 人');
+}
+function dzClear(){
+  if(!confirm('将清空已导入的 ' + dr.roster.length + ' 人名单（本机保存），下次需要重新导入。确定清空？')) return;
+  dr.roster = []; dr.fname = ''; dzSave(); render();
+}
+
+/* ---- 抽取计算 ---- */
+function dzTarget(n, pct, mode){
+  const raw = n * pct / 100;
+  let k = mode === 'ceil' ? Math.ceil(raw) : (mode === 'round' ? Math.round(raw) : Math.floor(raw));
+  if(!isFinite(k) || k < 0) k = 0;
+  if(k > n) k = n;
+  return {raw: raw, k: k};
+}
+function dzFmt(x){ return String(Math.round(x * 10000) / 10000); }
+function dzSetPct(v){
+  let p = parseFloat(v);
+  if(!isFinite(p) || p <= 0) p = 0.1;
+  if(p > 100) p = 100;
+  dr.pct = p; dzSave(); render();
+}
+function dzSetRound(m){ if(DZ_ROUND_LABEL[m]){ dr.rounding = m; dzSave(); render(); } }
+function dzSetSpeed(s){ if(DZ_SPEED[s]){ dr.speed = s; dzSave(); render(); } }
+
+/* ---- 随机源：拒绝采样消除模偏差 ---- */
+function dzRandInt(max){
+  if(max <= 1) return 0;
+  if(window.crypto && crypto.getRandomValues){
+    const lim = Math.floor(4294967296 / max) * max;
+    const a = new Uint32Array(1);
+    let v;
+    do{ crypto.getRandomValues(a); v = a[0]; }while(v >= lim);
+    return v % max;
+  }
+  return Math.floor(Math.random() * max);
+}
+function dzShuffle(a){
+  for(let i=a.length-1;i>0;i--){ const j = dzRandInt(i+1); const t = a[i]; a[i] = a[j]; a[j] = t; }
+  return a;
+}
+/* 名单指纹：抽签前留存，事后可核对名单未被中途更换。
+   先排序再哈希，使同一份名单无论行序如何都得到相同指纹。 */
+function dzHash(list){
+  const keys = [];
+  for(let i=0;i<list.length;i++) keys.push(list[i].n + '\u0001' + list[i].no);
+  keys.sort();
+  let h = 0x811c9dc5;
+  for(let i=0;i<keys.length;i++){
+    const s = keys[i];
+    for(let j=0;j<s.length;j++){ h ^= s.charCodeAt(j); h = (h * 0x01000193) >>> 0; }
+    h ^= 10; h = (h * 0x01000193) >>> 0;   // 条目分隔，避免相邻条目拼接歧义
+  }
+  return ('00000000' + h.toString(16)).slice(-8).toUpperCase();
+}
+function dzSleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+/* ---- 抽签执行与揭晓 ---- */
+function dzStart(){
+  const n = dr.roster.length;
+  const t = dzTarget(n, dr.pct, dr.rounding);
+  if(!n || t.k <= 0) return;
+  const idx = dzShuffle(dr.roster.map((_, i)=>i));
+  dz = {
+    mode:'run', k:t.k, picked:idx.slice(0, t.k), revealed:[],
+    hasNo: dr.roster.some(p=>p.no), hash:dzHash(dr.roster), at:new Date(), skip:false
+  };
+  const tk = ++dzToken;
+  render();
+  dzReveal(tk);
+}
+async function dzReveal(tk){
+  const dur = DZ_SPEED[dr.speed] || 780;
+  for(let i=0;i<dz.picked.length;i++){
+    if(tk !== dzToken || !dz) return;
+    const el = document.getElementById('dzRoll');
+    if(!el) return;
+    el.className = 'dz-rollname on';
+    const t0 = performance.now();
+    while(performance.now() - t0 < dur){
+      if(tk !== dzToken || dz.skip) break;
+      const p = dr.roster[dzRandInt(dr.roster.length)];
+      el.textContent = p ? p.n : '';
+      await dzSleep(72);
+    }
+    if(tk !== dzToken || !dz) return;
+    if(dz.skip) break;
+    const p = dr.roster[dz.picked[i]];
+    el.textContent = p.n;
+    el.className = 'dz-rollname lock';
+    dz.revealed.push(dz.picked[i]);
+    dzPaint();
+    await dzSleep(210);
+    if(tk !== dzToken || !dz) return;
+  }
+  dz.revealed = dz.picked.slice();
+  const rollEl = document.getElementById('dzRoll');
+  if(rollEl && dz.picked.length){             // 跳过动画时，大字定格到最后一位中签者
+    rollEl.textContent = dr.roster[dz.picked[dz.picked.length - 1]].n;
+    rollEl.className = 'dz-rollname lock';
+  }
+  const msg = document.getElementById('dzStageMsg');
+  if(msg) msg.textContent = '抽签完成 · 共 ' + dz.k + ' 人';
+  dzPaint();
+  const sp = document.getElementById('dzSkipBtn'); if(sp) sp.style.display = 'none';
+  ['dzAgainBtn','dzCopyBtn','dzDlBtn'].forEach(id=>{ const e = document.getElementById(id); if(e) e.style.display = ''; });
+}
+function dzSkip(){ if(dz) dz.skip = true; }
+function dzPaint(){
+  if(!dz) return;
+  const pg = document.getElementById('dzProg');
+  if(pg) pg.textContent = dz.revealed.length + ' / ' + dz.k;
+  const el = document.getElementById('dzPicked');
+  if(el) el.innerHTML = dz.revealed.map(i=>{
+    const p = dr.roster[i];
+    return `<span class="dz-chip">${esc(p.n)}${p.no ? `<em>${esc(p.no)}</em>` : ''}</span>`;
+  }).join('');
+}
+function dzAgain(){ dzStart(); }
+function dzLeave(){ dzToken++; dz = null; dzPaste = false; go('home'); }
+function dzEnter(){ dz = null; dzPaste = false; go('draw'); }
+
+/* ---- 结果导出 ---- */
+function dzCsv(s){ s = String(s == null ? '' : s); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
+function dzStamp(d){
+  const p = x=>String(x).padStart(2, '0');
+  return d.getFullYear() + p(d.getMonth()+1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes());
+}
+function dzTimeText(d){
+  const p = x=>String(x).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+function dzCopy(){
+  if(!dz || !dz.picked.length) return;
+  const lines = ['序号\t姓名' + (dz.hasNo ? '\t工号' : '')];
+  dz.picked.forEach((i, n)=>{
+    const p = dr.roster[i];
+    lines.push((n+1) + '\t' + p.n + (dz.hasNo ? '\t' + (p.no || '') : ''));
+  });
+  const txt = lines.join('\r\n');
+  const done = ()=>dzToast('已复制，可直接粘贴到 Excel');
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done, ()=>dzCopyFallback(txt, done));
+  } else dzCopyFallback(txt, done);
+}
+function dzCopyFallback(txt, done){
+  const ta = document.createElement('textarea');
+  ta.value = txt;
+  ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+  document.body.appendChild(ta);
+  ta.select();
+  try{ document.execCommand('copy'); done(); }catch(e){ alert('复制失败，请手动选择文本复制'); }
+  document.body.removeChild(ta);
+}
+function dzDownload(){
+  if(!dz || !dz.picked.length) return;
+  const lines = ['序号,姓名' + (dz.hasNo ? ',工号' : '')];
+  dz.picked.forEach((i, n)=>{
+    const p = dr.roster[i];
+    lines.push((n+1) + ',' + dzCsv(p.n) + (dz.hasNo ? ',' + dzCsv(p.no || '') : ''));
+  });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\uFEFF' + lines.join('\r\n')], {type:'text/csv;charset=utf-8'}));
+  a.download = '抽签结果_' + dzStamp(dz.at) + '.csv';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+
+/* ---- 下载 xlsx 名单模板：手写最小 xlsx（ZIP stored + inlineStr），不引任何库 ---- */
+function dzCrc32(u8){
+  let crc = 0xFFFFFFFF;
+  for(let i=0;i<u8.length;i++){
+    let c = (crc ^ u8[i]) & 0xFF;
+    for(let k=0;k<8;k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+    crc = (crc >>> 8) ^ c;
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+function dzZip(files){
+  const enc = new TextEncoder();
+  const now = new Date();
+  const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const dosDate = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+  const parts = [], central = [];
+  let offset = 0;
+  files.forEach(f=>{
+    const nm = enc.encode(f.name), crc = dzCrc32(f.data), len = f.data.length;
+    const lh = new Uint8Array(30 + nm.length), lv = new DataView(lh.buffer);
+    lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint16(6, 0x0800, true);
+    lv.setUint16(8, 0, true); lv.setUint16(10, dosTime, true); lv.setUint16(12, dosDate, true);
+    lv.setUint32(14, crc, true); lv.setUint32(18, len, true); lv.setUint32(22, len, true);
+    lv.setUint16(26, nm.length, true); lv.setUint16(28, 0, true);
+    lh.set(nm, 30);
+    parts.push(lh, f.data);
+
+    const cd = new Uint8Array(46 + nm.length), cv = new DataView(cd.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint16(8, 0x0800, true); cv.setUint16(10, 0, true);
+    cv.setUint16(12, dosTime, true); cv.setUint16(14, dosDate, true);
+    cv.setUint32(16, crc, true); cv.setUint32(20, len, true); cv.setUint32(24, len, true);
+    cv.setUint16(28, nm.length, true); cv.setUint16(30, 0, true); cv.setUint16(32, 0, true);
+    cv.setUint16(34, 0, true); cv.setUint16(36, 0, true); cv.setUint32(38, 0, true);
+    cv.setUint32(42, offset, true);
+    cd.set(nm, 46);
+    central.push(cd);
+    offset += lh.length + len;
+  });
+  let cdSize = 0;
+  central.forEach(c=>{ cdSize += c.length; });
+  const eo = new Uint8Array(22), ev = new DataView(eo.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
+  ev.setUint32(12, cdSize, true); ev.setUint32(16, offset, true);
+  return new Blob(parts.concat(central, [eo]),
+    {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+function dzTemplateBlob(){
+  const xe = s => String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+  const H = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+  const rows = [['姓名','工号'],['张三','1001'],['李四','1002'],['王五','1003']];
+  const sheetData = rows.map((r, i)=>`<row r="${i+1}">` + r.map((v, c)=>
+    `<c r="${dzColName(c)}${i+1}" t="inlineStr"><is><t>${xe(v)}</t></is></c>`).join('') + '</row>').join('');
+  const raw = [
+    ['[Content_Types].xml', H + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+      + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+      + '<Default Extension="xml" ContentType="application/xml"/>'
+      + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+      + '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+      + '</Types>'],
+    ['_rels/.rels', H + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+      + '</Relationships>'],
+    ['xl/workbook.xml', H + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+      + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+      + '<sheets><sheet name="名单" sheetId="1" r:id="rId1"/></sheets></workbook>'],
+    ['xl/_rels/workbook.xml.rels', H + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+      + '</Relationships>'],
+    ['xl/worksheets/sheet1.xml', H + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+      + '<cols><col min="1" max="1" width="14" customWidth="1"/><col min="2" max="2" width="14" customWidth="1"/></cols>'
+      + '<sheetData>' + sheetData + '</sheetData></worksheet>'],
+  ];
+  const enc = new TextEncoder();
+  const files = raw.map(f=>({name:f[0], data:enc.encode(f[1])}));
+  return dzZip(files);
+}
+function dzDownloadTemplate(){
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(dzTemplateBlob());
+  a.download = '抽签名单模板.xlsx';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+  dzToast('模板已下载，照着填姓名和工号');
+}
+
+/* ---- 抽签视图 ---- */
+/* 预览只显示数据行：表头用名单自己的标题行，正文从「数据起始行」开始，
+   所以标题行不会在正文里再出现一遍；行号列用原始 Excel 行号，便于和文件对照。 */
+function dzTitleOf(rows, c){
+  const t = dz.head >= 2 ? (rows[dz.head - 2] || []) : null;
+  const v = t && t[c] != null ? String(t[c]).trim() : '';
+  return v || ('第 ' + (c + 1) + ' 列');
+}
+function dzPreviewHTML(rows, maxRow, maxCol){
+  const head = [];
+  for(let c=0;c<maxCol;c++) head.push(`<th>${esc(dzTitleOf(rows, c))}</th>`);
+  const start = Math.max(0, (dz.head | 0) - 1);
+  const body = [];
+  for(let i=start;i<Math.min(rows.length, start + maxRow);i++){
+    const r = rows[i] || [], tds = [];
+    for(let c=0;c<maxCol;c++) tds.push(`<td>${esc(r[c] == null ? '' : String(r[c]))}</td>`);
+    body.push(`<tr><th>${i + 1}</th>${tds.join('')}</tr>`);
+  }
+  if(!body.length) return `<div class="dz-note" style="margin:0">起始行超出了表格范围，请检查「数据起始行」。</div>`;
+  return `<table class="dz-tbl"><thead><tr><th>行</th>${head.join('')}</tr></thead><tbody>${body.join('')}</tbody></table>`;
+}
+function vDrawMap(){
+  const rows = dz.sheets[dz.si].rows;
+  const maxc = Math.max(dzMaxCols(rows), 2);
+  const pv = Math.min(maxc, 8);
+  const sheetSel = dz.sheets.length > 1 ? `
+    <div class="dz-param"><label class="dz-lab">工作表</label>
+      <select class="dz-sel" onchange="dzSetSheet(this.value)">
+        ${dz.sheets.map((s, i)=>`<option value="${i}" ${i === dz.si ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+      </select></div>` : '';
+  const est = dz.autoOk ? dzCountValid(rows, dz.head, dz.colName, dz.colNo) : 0;
+  return `
+  <div class="exam-topbar">
+    <button class="btn ghost sm" onclick="dzCancelMap()">← 取消导入</button>
+    <span class="exam-pos">${esc(dz.fname)}</span>
+  </div>
+  <div class="sec-title"><span class="diamond"></span><h2>确认名单</h2></div>
+  <div class="card dz-card">
+    ${dz.err ? `<div class="dz-warn">${dz.err}</div>` : ''}
+    ${dz.autoOk ? `<div class="dz-note" style="margin:0">已按第一行标题识别：姓名列
+      <b>${esc(dzTitleOf(rows, dz.colName))}</b>，工号列 <b>${esc(dzTitleOf(rows, dz.colNo))}</b>，
+      数据从第 2 行开始。</div>` : `
+      <div class="dz-warn">没认出「姓名」和「工号」列。请让名单的<b>第一行是标题行</b>，
+        且包含「姓名」「工号」两列；也可以下载模板照着填。</div>
+      <div class="dz-actions" style="justify-content:flex-start;margin-top:12px">
+        <button class="btn primary sm" onclick="dzDownloadTemplate()">下载名单模板</button>
+      </div>`}
+    ${sheetSel}
+    ${dz.autoOk ? `
+    <div class="panel-title" style="margin-top:18px">数据预览</div>
+    <div class="dz-scroll">${dzPreviewHTML(rows, 7, pv)}</div>
+    <div class="dz-est">共识别到 <b class="num">${est}</b> 条记录</div>` : ''}
+    <button class="btn primary dz-start" onclick="dzConfirmMap()" ${est ? '' : 'disabled'}>确认导入</button>
+  </div>`;
+}
+function vDrawMain(){
+  const n = dr.roster.length;
+  const t = dzTarget(n, dr.pct, dr.rounding);
+  const k = t.k, raw = t.raw;
+  const zero = n > 0 && k <= 0;
+  const whole = Math.abs(raw - Math.round(raw)) < 1e-9;
+  const roster = n ? `
+    <div class="dz-row">
+      <span class="badge single">共 <b class="num">${n}</b> 人</span>
+      <span class="dz-fname">${esc(dr.fname || '名单')}</span>
+      <span class="dz-meta">
+        <button class="btn ghost sm" onclick="dzPickFile()">重新导入</button>
+        <button class="btn danger sm" onclick="dzClear()">清空</button>
+      </span>
+    </div>
+    <div class="dz-note">名单编号 <b class="dz-fp">${dzHash(dr.roster)}</b>（抽签前记下，事后可核对名单有没有变过）</div>
+    <div class="dz-chips dz-chips-all">
+      ${dr.roster.map(p=>`<span class="dz-chip">${esc(p.n)}<em>${esc(p.no)}</em></span>`).join('')}
+    </div>` : `
+    <div class="dz-file">
+      <div class="dz-fi">上传名单，需要<b>姓名</b>和<b>工号</b>两列</div>
+      <div class="dz-actions">
+        <button class="btn primary" onclick="dzPickFile()">选择文件</button>
+        <button class="btn ghost" onclick="dzTogglePaste()">粘贴</button>
+        <button class="btn ghost" onclick="dzDownloadTemplate()">下载模板</button>
+      </div>
+    </div>`;
+  const paste = dzPaste ? `
+    <div class="card dz-card">
+      <div class="panel-title">粘贴名单</div>
+      <div class="dz-note" style="margin:0">从 Excel 复制后粘贴到下面，一行一个人。</div>
+      <textarea class="dz-paste" id="dzPasteBox" placeholder="工号&#9;姓名&#10;1001&#9;张三&#10;1002&#9;李四"></textarea>
+      <div class="dz-actions" style="justify-content:flex-start;margin-top:12px">
+        <button class="btn primary sm" onclick="dzPasteApply()">导入</button>
+        <button class="btn ghost sm" onclick="dzTogglePaste()">取消</button>
+      </div>
+    </div>` : '';
+  return `
+  <div class="exam-topbar">
+    <button class="btn ghost sm" onclick="dzLeave()">← 返回首页</button>
+  </div>
+  <div class="sec-title"><span class="diamond"></span><h2>抽签</h2></div>
+  <div class="card dz-card">
+    <div class="panel-title">参与名单</div>
+    ${roster}
+  </div>
+  ${paste}
+  <div class="card dz-card">
+    <div class="panel-title">抽取设置</div>
+    <div class="dz-param">
+      <label class="dz-lab">抽取比例</label>
+      <div class="dz-pct">
+        <input class="tp-num" type="number" min="0.1" max="100" step="0.1" value="${dr.pct}" onchange="dzSetPct(this.value)">
+        <span>%</span>
+      </div>
+    </div>
+    <div class="dz-param">
+      <label class="dz-lab">取整方式</label>
+      <div class="dz-seg">
+        ${[['floor','向下取整'],['ceil','向上取整'],['round','四舍五入']].map(o=>
+          `<div class="seg ${dr.rounding === o[0] ? 'on' : ''}" onclick="dzSetRound('${o[0]}')">${o[1]}</div>`).join('')}
+      </div>
+    </div>
+    <div class="dz-calc">
+      <span>${n ? `${n} × ${dr.pct}% = ${dzFmt(raw)}` : '还没导入名单'}</span>
+      ${n && !whole ? `<span class="dz-arrow">→</span><span>${DZ_ROUND_LABEL[dr.rounding]}</span>` : ''}
+      <span class="dz-arrow">→</span>
+      <b>抽 ${k} 人</b>
+    </div>
+    ${zero ? `<div class="dz-warn">按这个比例应抽 <b>0</b> 人，请把比例调大一点。</div>` : ''}
+    <div class="dz-param" style="margin:16px 0 0">
+      <label class="dz-lab">抽取速度</label>
+      <div class="dz-seg">
+        ${[['fast','快'],['mid','中'],['slow','慢']].map(o=>
+          `<div class="seg ${dr.speed === o[0] ? 'on' : ''}" onclick="dzSetSpeed('${o[0]}')">${o[1]}</div>`).join('')}
+      </div>
+    </div>
+    <button class="btn primary dz-start" onclick="dzStart()" ${(!n || zero) ? 'disabled' : ''}>开始抽签</button>
+  </div>`;
+}
+function vDrawRun(){
+  return `
+  <div class="exam-topbar">
+    <button class="btn ghost sm" onclick="dzLeave()">← 返回首页</button>
+    <div class="et-info">
+      <span class="exam-pos">名单 ${dr.roster.length} 人 · 抽 ${dz.k} 人</span>
+    </div>
+  </div>
+  <div class="card dz-stage">
+    <div class="dz-stagehead">
+      <span id="dzStageMsg">抽取中…</span>
+      <span class="dz-prog num" id="dzProg">0 / ${dz.k}</span>
+    </div>
+    <div class="dz-rollbox"><div class="dz-rollname" id="dzRoll">准备中</div></div>
+    <div class="dz-actions">
+      <button class="btn ghost" id="dzSkipBtn" onclick="dzSkip()">跳过动画</button>
+      <button class="btn ghost" id="dzAgainBtn" style="display:none" onclick="dzAgain()">重新抽签</button>
+      <button class="btn ghost" id="dzCopyBtn" style="display:none" onclick="dzCopy()">复制结果</button>
+      <button class="btn primary" id="dzDlBtn" style="display:none" onclick="dzDownload()">下载表格</button>
+    </div>
+    <div class="dz-note" style="text-align:center">名单编号 <b class="dz-fp">${dz.hash}</b> · ${dzTimeText(dz.at)}</div>
+  </div>
+  <div class="card dz-card" style="margin-top:16px">
+    <div class="panel-title">中签名单</div>
+    <div class="dz-chips" id="dzPicked"></div>
+  </div>`;
+}
+function vDraw(){
+  if(dz && dz.mode === 'map') return vDrawMap();
+  if(dz && dz.mode === 'run') return vDrawRun();
+  return vDrawMain();
+}
 
 render();
 if(view==='exam' && exam) examTimerLoop();

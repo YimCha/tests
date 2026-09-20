@@ -44,6 +44,25 @@ data/config.xlsx（岗位配置 + 工具元数据，唯一人工编辑入口）
   即时反馈判分）。错题本记录错误次数（只增不减），连对 3 次移入「已掌握」，可强化练习
   高频（≥2 次）错题。练习数据存浏览器 localStorage，不入库。
 
+* **抽签**：独立于岗位的一级功能（首页右上角入口）。导入 Excel 名单（.xlsx，**零依赖本地解析**：
+  ZIP 中央目录 + 原生 `DecompressionStream('deflate-raw')` + `DOMParser`，不引入解析库）。
+  **零手动配置**：约定第一行是标题行、数据从第 2 行开始，按标题文字自动认列（先认工号，
+  再认姓名），识别结果只读展示，不给下拉框；认不出就提示按模板整理，并提供「下载名单模板」
+  （模板 xlsx 由 `dzTemplateBlob()` 在浏览器里手写 ZIP + inlineStr 生成，同样不引第三方库）。
+  **姓名与工号都必填，且工号必须唯一**——工号重复会让同一人的中签概率翻倍，所以检测到重复时
+  直接拦截导入并列出重复工号，不做静默去重；缺姓名或缺工号的行跳过。预览表格用名单自己的
+  标题行作表头，正文从第 2 行开始（行号列是原始 Excel 行号），标题行不会重复出现。
+  名单区**展示全部人员**，不做「还有 N 人」折叠。
+  应抽人数 = 总人数 × 百分比，取整方式三选一（向下 / 向上 / 四舍五入，`.5` 一律进位）；
+  向上取整结果超过总人数时钳制为全员，向下取整得 0 时拦截抽签并提示，不静默改数。
+  抽取用 `crypto.getRandomValues` + 拒绝采样（消除模偏差）做无放回等概率抽取。
+  名单及参数只存本机 localStorage，**不写回 HTML 文件**；名单编号用于事后核对名单未被更换
+  （排序后哈希，与行序无关）。
+
+* **抽签界面文案面向所有人**（抽签页可能投屏给全员看）：不写「等概率随机 / 无放回 / 列映射 /
+  未去重 / 指纹」这类技术术语，也不写「导入名单 · 设定比例 · 逐个揭晓」这类操作步骤式副标题。
+  用「抽取设置」「名单编号」「下载表格」「共 N 人」这类日常说法。
+
 * 路径一律用相对路径（pathlib 或基于 `__file__`），禁止硬编码绝对路径。
 
 * **题干文字规范**：空括号统一写作全角 `（）`；不得保留题号前缀（`1、`）、数字序号、
@@ -90,6 +109,12 @@ python src/split_by_position.py            # 按岗位拆分 -> data/by_position
 python src/split_by_position.py --format plain   # 同上，但用母题库原始列结构
 node src/_test_logic.js       # 组卷比例测试（6 岗位 × 10 次）
 node src/debug/_sim_test.js   # 考试与刷题流程测试
+python src/debug/_mk_draw_sample.py   # 生成抽签测试数据（draw_sample / draw_badtpl / draw_dup / 抽签测试名单 200 人）
+node src/debug/_draw_test.js          # 抽签功能测试（xlsx 解析/自动识别/工号校验/取整/抽样均匀性/模板闭环，88 项）
+python src/debug/_browser_check.py check      # 生成浏览器自检页，配合 Chrome headless --dump-dom 使用
+python src/debug/_browser_check.py manual     # 同上，改用 50 人人工测试名单验证
+python src/debug/_browser_check.py map        # 同上，停在确认名单页（用于截图）
+python src/debug/_browser_check.py params     # 同上，停在抽签参数页（用于截图）
 ```
 
 ## 依赖
