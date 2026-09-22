@@ -37,8 +37,9 @@ sandbox.BANK = JSON.parse(html.match(/const BANK = (.*?);\s*<\/script>/s)[1]);
 const ctx = vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync(APP, 'utf8'), ctx, { filename: '_app.js' });
 
-// 取前两个岗位出样例卷
-vm.runInContext('st.paperSel = [0, 1]; paperGenerate(); paper.at = new Date();', ctx);
+// 取前两个岗位出样例卷（直接构造，不经过需要 DOM 输入的 paperGenerate）
+vm.runInContext(
+  'paper = {at: new Date(), papers: [{pi: 0, list: paperGenOne(0)}, {pi: 1, list: paperGenOne(1)}]};', ctx);
 const doc = vm.runInContext('paperPrintHTML()', ctx);
 
 const out = path.join(ROOT, 'data', 'tmp', 'paper_preview.html');

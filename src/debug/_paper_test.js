@@ -131,7 +131,7 @@ const BANK = JSON.parse(m[1]);
 sandbox.BANK = BANK;
 
 vm.runInContext(fs.readFileSync(APP, 'utf8'), ctx, { filename: '_app_script.js' });
-vm.runInContext('globalThis.__T = { get paper(){return paper;}, get view(){return view;}, get st(){return st;}, get PAPER_TYPES(){return PAPER_TYPES;} };', ctx);
+vm.runInContext('globalThis.__T = { get paper(){return paper;}, get view(){return view;}, get st(){return st;}, get DEFAULT_TYPES(){return DEFAULT_TYPES;} };', ctx);
 const T = sandbox.__T;
 
 function setPaper(p) {
@@ -146,14 +146,14 @@ function fileOf(blob, name) {
 (async function main() {
   head('[0] 环境与口径常量');
   ok(BANK.positions.length >= 2, '真题库加载：岗位数 >= 2', BANK.positions.length);
-  ok(T.PAPER_TYPES.join(',') === '40,25,15', '题型口径 40/25/15（与模拟考试默认一致）', T.PAPER_TYPES && T.PAPER_TYPES.join(','));
-  ok(T.PAPER_TYPES.reduce((a, b) => a + b, 0) === 80, '题型合计 80 题');
+  ok(T.DEFAULT_TYPES.join(',') === '40,25,15', '题型默认口径 40/25/15（与模拟考试一致）', T.DEFAULT_TYPES && T.DEFAULT_TYPES.join(','));
+  ok(T.DEFAULT_TYPES.reduce((a, b) => a + b, 0) === 80, '题型合计 80 题');
   ok(typeof ctx.metaTitle === 'function' && ctx.metaTitle().length > 0, '卷头标题取自 config 元数据', ctx.metaTitle());
 
   head('[1] 抽题口径与模拟考试默认规则一致');
   let ruleOk = true;
   BANK.positions.forEach((pos, pi) => {
-    const r = ctx.paperRule(pi);
+    const r = ctx.defaultRule(pi);
     if (r.A !== pos.ratio[0]) ruleOk = false;
     pos.b.forEach((g, i) => { if (r.B[i] !== g[1]) ruleOk = false; });
     pos.c.forEach((g, i) => { if (r.C[i] !== g[1]) ruleOk = false; });
@@ -197,12 +197,20 @@ function fileOf(blob, name) {
   ok(genOk, '6 岗位 × 10 次：80 题无重复、岗位归属、A/B/C 与分组目标全部命中', genMsg);
 
   head('[3] 生成试卷：排序、结果状态');
+  // 模拟考试与试卷共用同一组读值函数：先在 DOM stub 里填好试卷设置（柜员岗默认口径）
+  function setPPInputs() {
+    const v = (id, val) => { elStub(id).value = String(val); };
+    v('pptp0', 40); v('pptp1', 25); v('pptp2', 15);
+    v('ppruleA', 30); v('ppruleB0', 40); v('ppruleC0', 5); v('ppruleC1', 5);
+  }
+  setPPInputs();
   vm.runInContext('st.paperSel = [3, 0, 3]', ctx);   // 乱序 + 重复勾选
   alerts.length = 0;
   ctx.paperGenerate();
   ok(alerts.length === 0, '正常生成无报错', alerts.join(' | '));
   ok(T.paper.papers.map(p => p.pi).join(',') === '0,3', '岗位按岗位表顺序输出（去重）', T.paper.papers.map(p => p.pi).join(','));
   ok(T.paper.papers.every(p => p.list.length === 80), '每套 80 题');
+  ok(JSON.stringify(T.st.paperTypes) === JSON.stringify([40, 25, 15]), '生成后题型设置持久化', JSON.stringify(T.st.paperTypes));
   ok(typeof T.paper.at.getTime === 'function', '记录生成时间');
 
   head('[4] 空勾选拦截');
@@ -212,6 +220,19 @@ function fileOf(blob, name) {
   ctx.paperGenerate();
   ok(alerts.length === 1 && alerts[0].includes('勾选'), '未勾选岗位时给出提示', alerts[0]);
   ok(T.paper === keep, '空勾选不覆盖已有生成结果');
+
+  head('[4b] 口径合计校验（与模拟考试同一 checkSetup）');
+  elStub('pptp2').value = '5';    // 40/25/5 = 70 ≠ 80
+  vm.runInContext('st.paperSel = [0]', ctx);
+  alerts.length = 0;
+  ctx.paperGenerate();
+  ok(alerts.length === 1 && alerts[0].includes('题型题量合计需为 80'), '题型合计≠80 拦截', alerts[0]);
+  setPPInputs();
+  elStub('ppruleA').value = '25';   // 25+40+5+5 = 75 ≠ 80
+  alerts.length = 0;
+  ctx.paperGenerate();
+  ok(alerts.length === 1 && alerts[0].includes('抽取规则合计需为 80'), '规则合计≠80 拦截', alerts[0]);
+  setPPInputs();
 
   head('[5] 组卷记录导出 -> 读回闭环');
   // 以当前生成结果的第一套作为固定基准卷
@@ -305,17 +326,22 @@ function fileOf(blob, name) {
   ok(optSeg.includes(`class="qo c${maxLen <= 8 ? '4' : maxLen <= 22 ? '2' : '1'}"`), '选项列数按最长选项自动选择', maxLen);
 
   head('[10] 视图：setup 与 done');
-  vm.runInContext('paper = null; st.paperSel = []', ctx);
+  vm.runInContext('paper = null; st.paperSel = []; st.paperTypes = null; st.paperRule = null', ctx);
   ctx.paperEnter();
   ok(T.view === 'paper', '进入生成试卷视图', T.view);
   let sv = ctx.vPaper();
   ok(sv.includes('选择岗位') && /disabled/.test(sv.split('paperGenerate')[1] || ''), '未勾选时生成按钮禁用');
+  ok(sv.includes('自定义设置') && sv.includes('pptp0'), '含自定义设置面板（题型题量）');
+  ok(sv.indexOf('ppruleA') < 0 && sv.includes('只勾选一个岗位'), '未勾选/多岗位时抽取规则锁定为默认口径', 'should not contain ppruleA');
   ctx.paperToggleSel(0);
-  ctx.paperToggleSel(2);
-  ok(JSON.stringify(T.st.paperSel) === JSON.stringify([0, 2]), '勾选状态记录', JSON.stringify(T.st.paperSel));
+  ok(JSON.stringify(T.st.paperSel) === JSON.stringify([0]), '勾选状态记录', JSON.stringify(T.st.paperSel));
   sv = ctx.vPaper();
   ok(!/disabled/.test(sv.split('paperGenerate')[1] || ''), '勾选后生成按钮可用');
-  ok(sv.includes('2 个岗位'), '按钮显示已勾选岗位数');
+  ok(sv.includes('1 个岗位'), '按钮显示已勾选岗位数');
+  ok(sv.includes('ppruleA') && sv.includes('ppruleTotal'), '单岗位时抽取规则可编辑');
+  ctx.paperToggleSel(2);
+  sv = ctx.vPaper();
+  ok(sv.indexOf('ppruleA') < 0 && sv.includes('各自方案默认口径'), '勾选两个岗位后规则回到默认口径', 'should not contain ppruleA');
   ok(sv.includes('全选') && sv.includes('按记录重印'), '提供全选与按记录重印入口');
   ctx.paperSelAll(true);
   ok(T.st.paperSel.length === BANK.positions.length, '全选覆盖所有岗位');
@@ -338,6 +364,43 @@ function fileOf(blob, name) {
   ctx.paperDownloadRecord();
   ok(/^组卷记录_.+_\d{8}_\d{4}\.xlsx$/.test(dlName), '单岗位下载文件名含岗位与时间戳', dlName);
   ok(dlName.indexOf(BANK.positions[0].name) >= 0, '文件名带岗位名', dlName);
+
+  head('[12] 自定义口径：与模拟考试共用公共层');
+  ok(ctx.checkSetup([40, 25, 15], { A: 30, B: [40], C: [5, 5] }) === '', '合法口径通过校验');
+  ok(ctx.checkSetup([40, 25, 15], null) === '', '规则为 null（多岗位）跳过规则校验');
+  ok(ctx.checkSetup([40, 25, 10], null).includes('题型题量合计需为 80'), '题型合计≠80 报错');
+  ok(ctx.checkSetup([40, 25, 15], { A: 30, B: [40], C: [5, 0] }).includes('抽取规则合计需为 80'), '规则合计≠80 报错');
+
+  vm.runInContext('st.paperTypes = [32, 32, 16]; st.paperRule = null', ctx);
+  const list32 = ctx.paperGenOne(0);
+  ok(list32.length === 80, '自定义题型：总数仍 80');
+  const tcnt = [0, 0, 0];
+  list32.forEach(qi => tcnt[BANK.q[qi].t]++);
+  ok(tcnt.join(',') === '32,32,16', '自定义题型分布生效（32/32/16）', tcnt.join(','));
+  ok(new Set(list32).size === 80, '自定义题型下仍无重复题');
+
+  vm.runInContext('st.paperRule = {pi: 0, rule: {A: 40, B: [40], C: [0, 0]}}', ctx);
+  const s40 = { A: 0, B: 0, C: 0 };
+  let grp40Ok = true;
+  ctx.paperGenOne(0).forEach(qi => {
+    const ch = BANK.chapters[BANK.q[qi].ch];
+    const c = ch.endsWith('A类') ? 'A' : ch.endsWith('B类') ? 'B' : 'C';
+    s40[c]++;
+    if (c === 'C') grp40Ok = false;   // C 目标 0，不应出现 C 类题
+  });
+  ok(s40.A === 40 && s40.B === 40 && s40.C === 0, '自定义抽取规则生效（A40/B40/C0）', JSON.stringify(s40));
+  ok(grp40Ok, '规则调整为 0 的分组不再出题');
+  ok(T.st.paperRule.pi === 0, '自定义规则绑定岗位');
+
+  vm.runInContext('st.paperTypes = null; st.paperRule = null', ctx);
+  const listBack = ctx.paperGenOne(0);
+  const sBack = { A: 0, B: 0, C: 0 };
+  listBack.forEach(qi => {
+    const ch = BANK.chapters[BANK.q[qi].ch];
+    sBack[ch.endsWith('A类') ? 'A' : ch.endsWith('B类') ? 'B' : 'C']++;
+  });
+  ok(JSON.stringify(sBack) === JSON.stringify({ A: BANK.positions[0].ratio[0], B: BANK.positions[0].ratio[1], C: BANK.positions[0].ratio[2] }),
+    '清掉自定义后回到方案默认口径', JSON.stringify(sBack));
 
   console.log('\n----------------------------------------');
   console.log(`通过 ${pass} 项，失败 ${fail} 项`);

@@ -2,6 +2,7 @@
 const KEY = 'exam_tool_v1';
 const TYPES = ['单选题','多选题','判断题'];
 const TYPE_SHORT = ['单选','多选','判断'];
+const DEFAULT_TYPES = [40,25,15];   // 题型题量默认口径（单选/多选/判断），模拟考试与生成试卷共用
 let st = load();
 let pools = buildPools();
 let view = 'home';
@@ -191,8 +192,8 @@ window.addEventListener('pagehide', ()=>{ recFlush(); });
 
 function load(){
   try{ const d = JSON.parse(localStorage.getItem(KEY));
-    return Object.assign({pos:0, types:[40,25,15], rule:null, dur:60, mode:'exam'}, d);
-  }catch(e){ return {pos:0, types:[40,25,15], rule:null, dur:60, mode:'exam'}; }
+    return Object.assign({pos:0, types:DEFAULT_TYPES.slice(), rule:null, dur:60, mode:'exam'}, d);
+  }catch(e){ return {pos:0, types:DEFAULT_TYPES.slice(), rule:null, dur:60, mode:'exam'}; }
 }
 function save(){ localStorage.setItem(KEY, JSON.stringify(st)); }
 
@@ -368,40 +369,93 @@ function genPaper(pi, types, rule){
   });
   return paper.sort((x,y)=>qAt(x).t - qAt(y).t);
 }
-function readTypes(){ return [0,1,2].map(i=>Math.max(0, Math.round(+document.getElementById('tp'+i).value)||0)); }
-function syncType(){
-  const t = readTypes(), el = document.getElementById('tpTotal');
-  if(el) el.textContent = t.reduce((a,b)=>a+b,0);
-  updateInfoCard();
+
+/* ===== 组卷设置（模拟考试与生成试卷共用的单源逻辑） =====
+   默认口径、设置行渲染、读值、合计校验都在这里，两边只传各自的 DOM id 前缀：
+   模拟考试沿用无前缀 id（tp0 / ruleA / ruleTotal...），生成试卷用 'pp' 前缀，互不干扰。
+   调整口径或校验规则时改这里即可，两个入口同时生效。 */
+function defaultRule(pi){
+  const pos = BANK.positions[pi];
+  return {A: pos.ratio[0], B: pos.b.map(g=>g[1]), C: pos.c.map(g=>g[1])};
 }
-function adjustType(i,d){
-  const el = document.getElementById('tp'+i);
-  const v = (+el.value||0)+d;
-  if(v<0) return;
-  el.value = v; syncType();
+/* 各设置面板注册表：id 前缀 -> {pi: 当前岗位下标}。模拟考试在 vExamSetup 注册 ''，试卷注册 'pp' */
+const SETUP_PANELS = {};
+function numVal(el){ return el ? Math.max(0, Math.round(+el.value)||0) : 0; }
+/* 抽取规则行：A 合集 + B/C 部门组，每行 − 输入框 + */
+function ruleRowsHTML(pos, rule, p){
+  const row = (id, name, val, c)=>`
+    <div class="tp-row">
+      ${c?`<span class="rp-tag" style="--c:${CLS_INFO[c]}">${c}</span>`:''}
+      <span class="tp-name">${name}</span>
+      <button class="tp-btn" onclick="adjustNum('${id}',-1,'${p}')">−</button>
+      <input class="tp-num num" id="${id}" type="number" value="${val}" min="0" oninput="onSetupInput('${p}')">
+      <button class="tp-btn" onclick="adjustNum('${id}',1,'${p}')">+</button>
+    </div>`;
+  return [
+    row(p+'ruleA', '所有部门 A 类题合集', rule.A, 'A'),
+    ...pos.b.map((g,i)=>row(p+'ruleB'+i, grpText(g), rule.B[i], 'B')),
+    ...pos.c.map((g,i)=>row(p+'ruleC'+i, grpText(g), rule.C[i], 'C')),
+  ].join('');
 }
-function adjustRule(id,d){
-  const el = document.getElementById(id);
-  const v = (+el.value||0)+d;
-  if(v<0) return;
-  el.value = v; syncRule();
+/* 题型题量行：单选/多选/判断 */
+function typeRowsHTML(types, p){
+  return TYPES.map((n,t)=>`
+    <div class="tp-row">
+      <span class="tp-name">${n}</span>
+      <button class="tp-btn" onclick="adjustNum('${p}tp${t}',-1,'${p}')">−</button>
+      <input class="tp-num num" id="${p}tp${t}" type="number" value="${types[t]}" min="0" oninput="onSetupInput('${p}')">
+      <button class="tp-btn" onclick="adjustNum('${p}tp${t}',1,'${p}')">+</button>
+    </div>`).join('');
 }
-function readRule(){
-  const pos = BANK.positions[st.pos];
+function readTypeInputs(p){ return [0,1,2].map(i=>numVal(document.getElementById(p+'tp'+i))); }
+function readRuleInputs(p, pi){
+  const pos = BANK.positions[pi];
   return {
-    A: Math.max(0, Math.round(+document.getElementById('ruleA').value)||0),
-    B: pos.b.map((_,i)=>Math.max(0, Math.round(+document.getElementById('ruleB'+i).value)||0)),
-    C: pos.c.map((_,i)=>Math.max(0, Math.round(+document.getElementById('ruleC'+i).value)||0)),
+    A: numVal(document.getElementById(p+'ruleA')),
+    B: pos.b.map((_,i)=>numVal(document.getElementById(p+'ruleB'+i))),
+    C: pos.c.map((_,i)=>numVal(document.getElementById(p+'ruleC'+i))),
   };
 }
-function syncRule(){
-  const pos = BANK.positions[st.pos];
-  const ids = ['ruleA', ...pos.b.map((_,i)=>'ruleB'+i), ...pos.c.map((_,i)=>'ruleC'+i)];
-  const vals = ids.map(id=>Math.max(0, Math.round(+document.getElementById(id).value)||0));
-  const t = vals.reduce((a,b)=>a+b,0);
-  const el = document.getElementById('ruleTotal');
-  if(el) el.textContent = t;
-  updateInfoCard();
+function ruleTotalOf(rule){ return rule.A + rule.B.reduce((a,b)=>a+b,0) + rule.C.reduce((a,b)=>a+b,0); }
+/* 面板合计行实时刷新；各入口自己的联动写在 onSetupInput 的分支里 */
+function syncPanelTotal(p){
+  const tEl = document.getElementById(p+'tpTotal');
+  if(tEl) tEl.textContent = readTypeInputs(p).reduce((a,b)=>a+b,0);
+  const rEl = document.getElementById(p+'ruleTotal');
+  if(rEl){
+    const reg = SETUP_PANELS[p];
+    if(reg) rEl.textContent = ruleTotalOf(readRuleInputs(p, reg.pi()));
+  }
+}
+function onSetupInput(p){
+  syncPanelTotal(p);
+  if(p === '' && view === 'exam') updateInfoCard();
+}
+function adjustNum(id, d, p){
+  const el = document.getElementById(id);
+  if(!el) return;
+  const v = (+el.value||0)+d;
+  if(v<0) return;
+  el.value = v;
+  onSetupInput(p);
+}
+/* 合计校验：题型题量必须合计 80；规则传 null 时跳过规则校验（多岗位各自默认口径） */
+function checkSetup(types, rule){
+  const tt = types.reduce((a,b)=>a+b,0);
+  if(tt !== 80) return `题型题量合计需为 80 题（当前 ${tt}）`;
+  if(rule){
+    const rt = ruleTotalOf(rule);
+    if(rt !== 80) return `抽取规则合计需为 80 题（当前 ${rt}）`;
+  }
+  return '';
+}
+function togglePanel(panelId, arrowId){
+  const p = document.getElementById(panelId);
+  if(!p) return;
+  const on = p.style.display !== 'none';
+  p.style.display = on ? 'none' : 'block';
+  const a = document.getElementById(arrowId);
+  if(a) a.textContent = on ? '▸' : '▾';
 }
 function adjustDur(d){
   const el = document.getElementById('durInput');
@@ -416,12 +470,10 @@ function syncDur(){
   updateInfoCard();
 }
 function startExam(){
-  const types = readTypes();
-  const total = types.reduce((a,b)=>a+b,0);
-  if(total!==80){ alert(`题型题量合计需为 80 题（当前 ${total}）`); return; }
-  const rule = readRule();
-  const rtotal = rule.A + rule.B.reduce((a,b)=>a+b,0) + rule.C.reduce((a,b)=>a+b,0);
-  if(rtotal!==80){ alert(`抽取规则合计需为 80 题（当前 ${rtotal}）`); return; }
+  const types = readTypeInputs('');
+  const rule = readRuleInputs('', st.pos);
+  const err = checkSetup(types, rule);
+  if(err){ alert(err); return; }
   st.types = types; st.rule = rule; syncDur(); save();
   exam={paper:genPaper(st.pos, types, rule), rule, cur:0, ans:{}, mark:{}, start:Date.now(), dur:st.dur*60, done:false};
   go('exam');
@@ -435,27 +487,11 @@ function vExam(){
 function grpText(g){ return g[0].length>1 ? g[0].join(' + ') : g[0][0]; }
 function vExamSetup(){
   const pos = BANK.positions[st.pos];
-  const rule = st.rule || {A:pos.ratio[0], B:pos.b.map(g=>g[1]), C:pos.c.map(g=>g[1])};
+  const rule = st.rule || defaultRule(st.pos);
   const rA = rule.A, rB = rule.B.reduce((a,b)=>a+b,0), rC = rule.C.reduce((a,b)=>a+b,0);
-  const ruleRows = [
-    {id:'ruleA', tag:'A', sub:'所有部门 A 类题合集', val:rule.A},
-    ...pos.b.map((g,i)=>({id:'ruleB'+i, tag:'B', sub:grpText(g), val:rule.B[i]})),
-    ...pos.c.map((g,i)=>({id:'ruleC'+i, tag:'C', sub:grpText(g), val:rule.C[i]})),
-  ].map(r=>`
-    <div class="tp-row">
-      <span class="rp-tag" style="--c:${CLS_INFO[r.tag]}">${r.tag}</span>
-      <span class="tp-name">${r.sub}</span>
-      <button class="tp-btn" onclick="adjustRule('${r.id}',-1)">−</button>
-      <input class="tp-num num" id="${r.id}" type="number" value="${r.val}" min="0" oninput="syncRule()">
-      <button class="tp-btn" onclick="adjustRule('${r.id}',1)">+</button>
-    </div>`).join('');
-  const tpRows = TYPES.map((n,t)=>`
-    <div class="tp-row">
-      <span class="tp-name">${n}</span>
-      <button class="tp-btn" onclick="adjustType(${t},-1)">−</button>
-      <input class="tp-num num" id="tp${t}" type="number" value="${st.types[t]}" min="0" oninput="syncType()">
-      <button class="tp-btn" onclick="adjustType(${t},1)">+</button>
-    </div>`).join('');
+  SETUP_PANELS[''] = {pi: ()=>st.pos};
+  const ruleRows = ruleRowsHTML(pos, rule, '');
+  const tpRows = typeRowsHTML(st.types, '');
   return `
   <div class="exam-setup card">
     <div class="seal-ring" style="margin:0 auto 6px">卷</div>
@@ -505,13 +541,7 @@ function vExamSetup(){
     </div>
   </div>`;
 }
-function toggleSetup(){
-  const p = document.getElementById('setupPanel');
-  const on = p.style.display!=='none';
-  p.style.display = on?'none':'block';
-  const a = document.getElementById('stArrow');
-  if(a) a.textContent = on?'▸':'▾';
-}
+function toggleSetup(){ togglePanel('setupPanel', 'stArrow'); }
 function updateInfoCard(){
   const pos = BANK.positions[st.pos];
   const rule = st.rule || {A:pos.ratio[0], B:pos.b.map(g=>g[1]), C:pos.c.map(g=>g[1])};
@@ -1843,15 +1873,15 @@ function vDraw(){
    汇成一个打印版文档（新窗口打开即可打印或另存 PDF）。
    组卷与模拟考试共用同一套抽题逻辑与默认口径（80 题、每题 1 分）。
    每次生成可下载「组卷记录」xlsx 留档；加印时导入记录即可原样重出同一张卷。 */
-const PAPER_TYPES = [40, 25, 15];    // 单选 / 多选 / 判断，与模拟考试默认口径一致
 const PAPER_LETTERS = ['A','B','C','D','E','F','G','H'];
 let paper = null;                    // 本次会话的生成结果 {at, papers:[{pi, list:[qi]}]}
 
 function metaTitle(){ return (BANK.meta && (BANK.meta['工具标题'] || BANK.meta.title)) || ''; }
 function paperEnter(){ go('paper'); }
-function paperRule(pi){
-  const pos = BANK.positions[pi];
-  return {A: pos.ratio[0], B: pos.b.map(g=>g[1]), C: pos.c.map(g=>g[1])};
+/* 试卷设置存本机（题型题量全局共用；抽取规则仅在勾选单个岗位时可自定义，记岗位） */
+function paperTypes(){ return st.paperTypes || DEFAULT_TYPES.slice(); }
+function paperRuleFor(pi){
+  return (st.paperRule && st.paperRule.pi === pi) ? st.paperRule.rule : defaultRule(pi);
 }
 function paperToggleSel(pi){
   const s = st.paperSel || (st.paperSel = []);
@@ -1866,14 +1896,21 @@ function paperSelAll(on){
 function paperAnsStr(q){
   return q.t === 2 ? q.a : (q.t === 1 ? [...q.a].sort().join('') : q.a);
 }
-/* 组一个岗位的卷子：与模拟考试同一套 genPaper，用该岗位方案默认口径 */
+/* 组一个岗位的卷子：与模拟考试同一套 genPaper；规则按「勾选单岗位时的自定义，否则方案默认口径」 */
 function paperGenOne(pi){
-  return genPaper(pi, PAPER_TYPES, paperRule(pi));
+  return genPaper(pi, paperTypes(), paperRuleFor(pi));
 }
 function paperGenerate(){
   const sel = [...new Set(st.paperSel || [])].sort((a, b)=>a - b).filter(pi=>pi >= 0 && pi < BANK.positions.length);
   if(!sel.length){ alert('请先勾选要出卷的岗位'); return; }
-  paper = { at: new Date(), papers: sel.map(pi=>({pi, list: paperGenOne(pi)})) };
+  const types = readTypeInputs('pp');
+  const single = sel.length === 1 ? sel[0] : -1;
+  const rule = single >= 0 ? readRuleInputs('pp', single) : null;
+  const err = checkSetup(types, rule);
+  if(err){ alert(err); return; }
+  st.paperTypes = types; save();
+  if(single >= 0){ st.paperRule = {pi: single, rule}; save(); }
+  paper = { at: new Date(), papers: sel.map(pi=>({pi, list: genPaper(pi, types, single >= 0 ? rule : defaultRule(pi))})) };
   render();
   paperOpenPrint();
 }
@@ -2065,13 +2102,14 @@ function paperRecordRows(){
 }
 function paperRecordBlob(){
   const total = paper.papers.reduce((a, p)=>a + p.list.length, 0);
+  const types = paperTypes();
   const info = [
     ['项目','内容'],
     ['工具标题', metaTitle()],
     ['生成时间', dzTimeText(paper.at)],
     ['试卷份数', String(paper.papers.length)],
     ['每卷题数', String(paper.papers.length ? Math.round(total / paper.papers.length) : 0)],
-    ['题型分布', `单选${PAPER_TYPES[0]} · 多选${PAPER_TYPES[1]} · 判断${PAPER_TYPES[2]}`],
+    ['题型分布', `单选${types[0]} · 多选${types[1]} · 判断${types[2]}`],
   ];
   return ppSheetBlob([
     {name:'组卷记录', rows:paperRecordRows(), cols:6},
@@ -2166,7 +2204,15 @@ function vPaper(){
 }
 function vPaperSetup(){
   const sel = st.paperSel || [];
-  const rows = BANK.positions.map((p, i)=>{
+  const single = sel.length === 1 ? sel[0] : -1;
+  const types = paperTypes();
+  const rule = single >= 0 ? paperRuleFor(single) : null;
+  SETUP_PANELS['pp'] = {pi: ()=> (st.paperSel || []).length === 1 ? st.paperSel[0] : -1};
+  const rows = {
+    ruleRows: single >= 0 ? ruleRowsHTML(BANK.positions[single], rule, 'pp') : '',
+    typeRows: typeRowsHTML(types, 'pp'),
+  };
+  const posRows = BANK.positions.map((p, i)=>{
     const pool = poolFor(i);
     return `<div class="unit-row ${sel.includes(i) ? 'on' : ''}" onclick="paperToggleSel(${i})">
       <span class="u-box">${sel.includes(i) ? '✓' : ''}</span>
@@ -2174,19 +2220,42 @@ function vPaperSetup(){
       <span class="u-num num">${pool.A.length + pool.B.length + pool.C.length} 题</span>
     </div>`;
   }).join('');
+  const ruleBlock = single >= 0 ? `
+    <div class="es-sec">抽取规则</div>
+    <div class="type-panel">
+      ${rows.ruleRows}
+      <div class="tp-total">合计 <b id="ppruleTotal" class="num">${ruleTotalOf(rule)}</b> 题</div>
+    </div>` : `
+    <div class="es-sec">抽取规则</div>
+    <div class="type-panel" style="padding:12px 15px">
+      <div class="dz-note" style="margin:0">勾选了 ${sel.length} 个岗位，各岗位方案不同，抽取规则按<b>各自方案默认口径</b>执行；只勾选一个岗位时，可以在这里自定义。</div>
+    </div>`;
   return `
   <div class="exam-topbar">
     <button class="btn ghost sm" onclick="go('home')">← 返回首页</button>
   </div>
   <div class="sec-title"><span class="diamond"></span><h2>生成试卷</h2></div>
   <div class="card dz-card">
-    <div class="es-notice" style="margin:0 0 16px">勾选岗位，每个岗位出一套纸质试卷：单选 ${PAPER_TYPES[0]} 题 + 多选 ${PAPER_TYPES[1]} 题 + 判断 ${PAPER_TYPES[2]} 题，每题 1 分共 80 分，与线上模拟考试同一套抽题口径。每套包含<b>空白试卷、答题卡、参考答案</b>三部分，打印时按材料分开取用。</div>
+    <div class="es-notice" style="margin:0 0 16px">勾选岗位，每个岗位出一套纸质试卷：单选 ${types[0]} 题 + 多选 ${types[1]} 题 + 判断 ${types[2]} 题，每题 1 分共 80 分，与线上模拟考试同一套抽题逻辑，默认按《实施方案》口径，可展开「自定义设置」调整。每套包含<b>空白试卷、答题卡、参考答案</b>三部分，打印时按材料分开取用。</div>
     <div class="panel-title">选择岗位</div>
     <div class="dz-row" style="margin:10px 0 12px">
       <button class="btn ghost sm" onclick="paperSelAll(true)">全选</button>
       <button class="btn ghost sm" onclick="paperSelAll(false)">清空</button>
     </div>
-    <div class="type-panel" style="gap:9px">${rows}</div>
+    <div class="type-panel" style="gap:9px">${posRows}</div>
+    <div class="setup-toggle" onclick="togglePanel('ppSetupPanel', 'ppStArrow')">
+      <span class="st-t">自定义设置</span>
+      <span class="st-sub">默认按《实施方案》，可调整</span>
+      <span class="st-arrow" id="ppStArrow">▾</span>
+    </div>
+    <div id="ppSetupPanel" class="setup-panel" style="display:none">
+      ${ruleBlock}
+      <div class="es-sec">题型题量</div>
+      <div class="type-panel">
+        ${rows.typeRows}
+        <div class="tp-total">合计 <b id="pptpTotal" class="num">${types.reduce((a,b)=>a+b,0)}</b> 题</div>
+      </div>
+    </div>
     <div class="es-actions" style="position:static;background:none;padding:20px 0 0">
       <button class="btn ghost" onclick="paperImportRecord()">按记录重印</button>
       <button class="btn primary" onclick="paperGenerate()" ${sel.length ? '' : 'disabled'}>生成试卷${sel.length ? `（${sel.length} 个岗位）` : ''}</button>
