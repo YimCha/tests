@@ -63,6 +63,19 @@ data/config.xlsx（岗位配置 + 工具元数据，唯一人工编辑入口）
   未去重 / 指纹」这类技术术语，也不写「导入名单 · 设定比例 · 逐个揭晓」这类操作步骤式副标题。
   用「抽取设置」「名单编号」「下载表格」「共 N 人」这类日常说法。
 
+* **生成试卷**：独立于岗位的一级功能（首页右上角入口，与「抽签」并排）。勾选岗位（多选、
+  去重、固定按岗位表顺序出卷），每个岗位出一套纸质试卷：单选 40 + 多选 25 + 判断 15，
+  每题 1 分共 80 分，组卷复用模拟考试的 `genPaper` 与该岗位方案默认口径。
+  每套含**空白试卷 / 答题卡 / 参考答案**三段（打印文档按此排序，答案在最后，防止随空白卷误发），
+  新窗口打开即可打印或另存 PDF；短选项自动 2/4 列并排，题目块不跨页断裂；
+  参考答案只含题号 + 答案，**不含解析**。
+  每次生成可下载「组卷记录」xlsx（零依赖手写 ZIP，sheet：组卷记录 + 信息）留档；
+  「按记录重印」导入记录后逐行校验岗位 / 题库题号 / 卷面题号 / 章节 / 答案与当前题库一致，
+  任一不符（题库已更新或记录被改）直接拒绝重印，避免印出错卷。
+
+* genPaper 组卷保证全卷无重复：抽题单元（A 合集 / B、C 部门组）池互斥，单元内跨题型共享
+  已用集合，某题型不足时补抽其他题型也不会与已抽的题重复。
+
 * 路径一律用相对路径（pathlib 或基于 `__file__`），禁止硬编码绝对路径。
 
 * **题干文字规范**：空括号统一写作全角 `（）`；不得保留题号前缀（`1、`）、数字序号、
@@ -111,6 +124,8 @@ node src/_test_logic.js       # 组卷比例测试（6 岗位 × 10 次）
 node src/debug/_sim_test.js   # 考试与刷题流程测试
 python src/debug/_mk_draw_sample.py   # 生成抽签测试数据（draw_sample / draw_badtpl / draw_dup / 抽签测试名单 200 人）
 node src/debug/_draw_test.js          # 抽签功能测试（xlsx 解析/自动识别/工号校验/取整/抽样均匀性/模板闭环，88 项）
+node src/debug/_paper_test.js         # 生成试卷功能测试（组卷口径/无重复/记录导出导入/篡改拦截/打印文档，53 项）
+node src/debug/_mk_paper_preview.js   # 生成打印版试卷样例（data/tmp/paper_preview.html，人工预览版式）
 python src/debug/_browser_check.py check      # 生成浏览器自检页，配合 Chrome headless --dump-dom 使用
 python src/debug/_browser_check.py manual     # 同上，改用 50 人人工测试名单验证
 python src/debug/_browser_check.py map        # 同上，停在确认名单页（用于截图）

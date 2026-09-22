@@ -229,8 +229,9 @@ function render(){
   else if(view==='practice') html = vPractice();
   else if(view==='wrong') html = vWrong();
   else if(view==='draw') html = vDraw();
+  else if(view==='paper') html = vPaper();
   app.innerHTML = html;
-  app.classList.toggle('wide', (view==='exam' && !exam) || view==='practice' || view==='wrong' || view==='draw');
+  app.classList.toggle('wide', (view==='exam' && !exam) || view==='practice' || view==='wrong' || view==='draw' || view==='paper');
   if(view==='exam' && exam) drawExam();
   if(view==='practice' && practice && !practice.done) drawPractice();
   bindGlobal();
@@ -246,7 +247,7 @@ function setMode(m){ st.mode=m; save(); render(); }
 function vHome(){
   const tabs = [['exam','模拟考试'],['practice','刷题练习'],['wrong','错题本']].map(t=>
     `<button class="top-tab ${st.mode===t[0]?'on':''}" onclick="setMode('${t[0]}')">${t[1]}</button>`).join('')
-    + `<button class="top-tab tab-far" onclick="dzEnter()">抽签</button>`;
+    + `<button class="top-tab tab-far" onclick="paperEnter()">生成试卷</button><button class="top-tab" onclick="dzEnter()">抽签</button>`;
   const title = {exam:'请选择考试岗位', practice:'选择岗位 · 刷题练习', wrong:'选择岗位 · 错题本'}[st.mode];
   let cards;
   if(st.mode==='wrong'){
@@ -314,8 +315,6 @@ let examLoopId = 0;
 function clsOf(qi){ const ch = BANK.chapters[qAt(qi).ch]; return ch.endsWith('A类')?'A':(ch.endsWith('B类')?'B':'C'); }
 function deptOf(qi){ const ch = BANK.chapters[qAt(qi).ch]; return ch.slice(0,-2); }
 
-// 每题 1 分：按分值抽题即按题数抽题（池内随机抽）
-function pickPoints(qids, pts){ return shuffle(qids).slice(0, pts); }
 // 把 total 按 weights 比例拆成整数，四舍五入并保证合计=total
 function splitByWeight(total, weights){
   const sum = weights.reduce((a,b)=>a+b,0);
@@ -346,14 +345,6 @@ function genMatrix(types, unitTargets){
   }
   return M;
 }
-// 从单元池抽指定题型 n 题；该题型不足时用同单元其他题型补足，保证单元题数=目标
-function pickTyped(pool, type, n){
-  const typed = pool.filter(qi=>qAt(qi).t===type);
-  const other = pool.filter(qi=>qAt(qi).t!==type);
-  const r = pickPoints(typed, n);
-  if(r.length<n) r.push(...pickPoints(other, n-r.length));
-  return r;
-}
 function genPaper(pi, types, rule){
   const pos = BANK.positions[pi], pool = poolFor(pi);
   const units = [{pool:pool.A, target:rule.A}];
@@ -361,9 +352,20 @@ function genPaper(pi, types, rule){
   pos.c.forEach((g,i)=>units.push({pool:pool.C.filter(qi=>g[0].includes(deptOf(qi))), target:rule.C[i]}));
   const M = genMatrix(types, units.map(u=>u.target));
   const paper = [];
-  types.forEach((_,t)=>units.forEach((u,c)=>{
-    paper.push(...pickTyped(u.pool, t, M[t][c]));
-  }));
+  // 单元内跨题型共享已用集合（本行抽中立即登记）：某题型不足补抽其他题型时，绝不与已抽的题重复
+  units.forEach((u,c)=>{
+    const used = new Set();
+    types.forEach((_,t)=>{
+      const n = M[t][c];
+      if(n <= 0) return;
+      const r = shuffle(u.pool.filter(qi=>!used.has(qi) && qAt(qi).t===t)).slice(0, n);
+      r.forEach(qi=>used.add(qi));
+      if(r.length < n)
+        r.push(...shuffle(u.pool.filter(qi=>!used.has(qi))).slice(0, n - r.length));
+      r.forEach(qi=>used.add(qi));
+      paper.push(...r);
+    });
+  });
   return paper.sort((x,y)=>qAt(x).t - qAt(y).t);
 }
 function readTypes(){ return [0,1,2].map(i=>Math.max(0, Math.round(+document.getElementById('tp'+i).value)||0)); }
@@ -1591,7 +1593,7 @@ function dzCrc32(u8){
   }
   return (crc ^ 0xFFFFFFFF) >>> 0;
 }
-function dzZip(files){
+function dzZip(files, mime){
   const enc = new TextEncoder();
   const now = new Date();
   const dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
@@ -1627,7 +1629,7 @@ function dzZip(files){
   ev.setUint16(8, files.length, true); ev.setUint16(10, files.length, true);
   ev.setUint32(12, cdSize, true); ev.setUint32(16, offset, true);
   return new Blob(parts.concat(central, [eo]),
-    {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    {type: mime || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
 }
 function dzTemplateBlob(){
   const xe = s => String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
@@ -1834,6 +1836,381 @@ function vDraw(){
   if(dz && dz.mode === 'map') return vDrawMap();
   if(dz && dz.mode === 'run') return vDrawRun();
   return vDrawMain();
+}
+
+/* ================= 生成试卷 =================
+   在浏览器里按各岗位考试方案组出纸质试卷：空白卷、答题卡、参考答案，
+   汇成一个打印版文档（新窗口打开即可打印或另存 PDF）。
+   组卷与模拟考试共用同一套抽题逻辑与默认口径（80 题、每题 1 分）。
+   每次生成可下载「组卷记录」xlsx 留档；加印时导入记录即可原样重出同一张卷。 */
+const PAPER_TYPES = [40, 25, 15];    // 单选 / 多选 / 判断，与模拟考试默认口径一致
+const PAPER_LETTERS = ['A','B','C','D','E','F','G','H'];
+let paper = null;                    // 本次会话的生成结果 {at, papers:[{pi, list:[qi]}]}
+
+function metaTitle(){ return (BANK.meta && (BANK.meta['工具标题'] || BANK.meta.title)) || ''; }
+function paperEnter(){ go('paper'); }
+function paperRule(pi){
+  const pos = BANK.positions[pi];
+  return {A: pos.ratio[0], B: pos.b.map(g=>g[1]), C: pos.c.map(g=>g[1])};
+}
+function paperToggleSel(pi){
+  const s = st.paperSel || (st.paperSel = []);
+  const i = s.indexOf(pi);
+  if(i >= 0) s.splice(i, 1); else s.push(pi);
+  save(); render();
+}
+function paperSelAll(on){
+  st.paperSel = on ? BANK.positions.map((_, i)=>i) : [];
+  save(); render();
+}
+function paperAnsStr(q){
+  return q.t === 2 ? q.a : (q.t === 1 ? [...q.a].sort().join('') : q.a);
+}
+/* 组一个岗位的卷子：与模拟考试同一套 genPaper，用该岗位方案默认口径 */
+function paperGenOne(pi){
+  return genPaper(pi, PAPER_TYPES, paperRule(pi));
+}
+function paperGenerate(){
+  const sel = [...new Set(st.paperSel || [])].sort((a, b)=>a - b).filter(pi=>pi >= 0 && pi < BANK.positions.length);
+  if(!sel.length){ alert('请先勾选要出卷的岗位'); return; }
+  paper = { at: new Date(), papers: sel.map(pi=>({pi, list: paperGenOne(pi)})) };
+  render();
+  paperOpenPrint();
+}
+
+/* ---- 打印版文档 ---- */
+function paperSegItems(p, t){
+  const items = [];
+  p.list.forEach((qi, i)=>{ if(qAt(qi).t === t) items.push({qi, i}); });
+  return items;
+}
+function paperQBlock(q, no){
+  const stem = q.t === 2 ? esc(q.s) + '（　　）' : esc(q.s);
+  let opts = '';
+  if(q.t !== 2){
+    const len = Math.max(...q.o.map(t=>[...String(t)].length));
+    const cls = len <= 8 ? 'c4' : (len <= 22 ? 'c2' : 'c1');
+    opts = `<div class="qo ${cls}">` + q.o.map((t, i)=>`<span>${PAPER_LETTERS[i]}．${esc(t)}</span>`).join('') + `</div>`;
+  }
+  return `<div class="q"><div class="qs"><b>${no}.</b>${stem}</div>${opts}</div>`;
+}
+function paperSheetHTML(p, first){
+  const pos = BANK.positions[p.pi];
+  const segNames = ['一、单选题','二、多选题','三、判断题'];
+  const segs = [0,1,2].map(t=>{
+    const items = paperSegItems(p, t);
+    if(!items.length) return '';
+    let sub = `（共 ${items.length} 题，每题 1 分）`;
+    if(t === 2) sub = `（共 ${items.length} 题，每题 1 分；正确的在括号内写「对」，错误的写「错」）`;
+    return `<div class="psec">${segNames[t]}${sub}</div>` + items.map(x=>paperQBlock(qAt(x.qi), x.i + 1)).join('');
+  }).join('');
+  return `
+  <section class="sheet${first ? '' : ' pb'}">
+    <div class="ptitle">${esc(metaTitle())}</div>
+    <div class="psub">${esc(pos.name)}　·　试卷</div>
+    <div class="phrow"><span>姓名：＿＿＿＿＿＿</span><span>工号：＿＿＿＿＿＿</span><span>得分：＿＿＿＿＿＿</span></div>
+    <div class="pnote">本卷共 ${p.list.length} 题，每题 1 分，满分 ${p.list.length} 分；请将答案填写在每题的括号内。选择题只有一个正确答案的为单选题，有两个及以上正确答案的为多选题。</div>
+    ${segs}
+  </section>`;
+}
+function paperCardHTML(p){
+  const pos = BANK.positions[p.pi];
+  const segNames = ['一、单选题','二、多选题','三、判断题'];
+  const segs = [0,1,2].map(t=>{
+    const items = paperSegItems(p, t);
+    if(!items.length) return '';
+    const half = Math.ceil(items.length / 2);
+    const col = arr => arr.map(x=>{
+      const q = qAt(x.qi);
+      const boxes = q.t === 2
+        ? `<span class="bx bxt">对</span><span class="bx bxt">错</span>`
+        : q.o.map((_, k)=>`<span class="bx">${PAPER_LETTERS[k]}</span>`).join('');
+      return `<div class="ac-q"><span class="ac-n">${x.i + 1}</span>${boxes}</div>`;
+    }).join('');
+    return `<div class="ac-sec">${segNames[t]}（第 ${items[0].i + 1}～${items[items.length - 1].i + 1} 题${t === 1 ? '，可涂多个' : ''}）</div>
+      <div class="ac-cols"><div class="ac-col">${col(items.slice(0, half))}</div><div class="ac-col">${col(items.slice(half))}</div></div>`;
+  }).join('');
+  return `
+  <section class="sheet pb">
+    <div class="ptitle">${esc(metaTitle())} · 答题卡</div>
+    <div class="psub">${esc(pos.name)}</div>
+    <div class="phrow"><span>姓名：＿＿＿＿＿＿</span><span>工号：＿＿＿＿＿＿</span></div>
+    <div class="pnote">请用黑色签字笔将所选选项的字母框涂满涂黑；判断题涂「对」或「错」。</div>
+    ${segs}
+  </section>`;
+}
+function paperKeyHTML(p){
+  const pos = BANK.positions[p.pi];
+  const segNames = ['一、单选题','二、多选题','三、判断题'];
+  const segs = [0,1,2].map(t=>{
+    const items = paperSegItems(p, t);
+    if(!items.length) return '';
+    return `<div class="ac-sec">${segNames[t]}</div>
+      <div class="kgrid">${items.map(x=>`<span class="kit"><b>${x.i + 1}</b>${esc(paperAnsStr(qAt(x.qi)))}</span>`).join('')}</div>`;
+  }).join('');
+  return `
+  <section class="sheet pb">
+    <div class="ptitle">${esc(metaTitle())} · 参考答案</div>
+    <div class="psub">${esc(pos.name)}　·　${dzTimeText(paper.at)}</div>
+    ${segs}
+    <div class="pnote" style="margin-top:20px">本页为阅卷用参考答案，请单独保管，勿随试卷下发。</div>
+  </section>`;
+}
+function paperPrintCSS(){
+  return `
+@page{size:A4;margin:13mm 12mm}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Source Han Serif SC","Noto Serif CJK SC","SimSun","STSong",serif;color:#000;background:#fff;font-size:12.5px;line-height:1.7}
+.toolbar{position:sticky;top:0;z-index:9;display:flex;gap:10px;justify-content:center;padding:10px;background:#f2f2f2;border-bottom:1px solid #ddd;font-family:system-ui,"Microsoft YaHei",sans-serif}
+.toolbar button{padding:8px 24px;border:1px solid #bbb;border-radius:6px;background:#fff;font-size:13px;cursor:pointer}
+.toolbar button.primary{background:#1a73e8;color:#fff;border-color:#1a73e8}
+.sheet{max-width:186mm;margin:0 auto;padding:5mm 0}
+.sheet.pb{page-break-before:always}
+.ptitle{text-align:center;font-size:19px;font-weight:700;letter-spacing:2px}
+.psub{text-align:center;font-size:12px;margin-top:3px;letter-spacing:1px}
+.phrow{display:flex;justify-content:space-between;gap:12px;border-bottom:1.5px solid #000;padding:7px 2px 6px;margin:10px 0 6px;font-size:12.5px}
+.pnote{font-size:10.5px;color:#333;margin-bottom:10px;line-height:1.6}
+.psec{font-weight:700;font-size:13.5px;margin:12px 0 6px}
+.q{break-inside:avoid;margin-bottom:8px}
+.qs{font-size:12.5px}
+.qs b{margin-right:3px}
+.qo{display:grid;gap:1px 16px;padding-left:20px}
+.qo.c4{grid-template-columns:repeat(4,1fr)}
+.qo.c2{grid-template-columns:repeat(2,1fr)}
+.qo.c1{grid-template-columns:1fr}
+.ac-sec{font-weight:700;font-size:13px;margin:10px 0 5px}
+.ac-cols{display:flex;gap:16px}
+.ac-col{flex:1;min-width:0}
+.ac-q{display:flex;align-items:center;gap:3px;margin-bottom:3px;break-inside:avoid}
+.ac-n{flex:none;width:24px;text-align:right;font-size:10.5px;font-family:Tahoma,"Microsoft YaHei",sans-serif}
+.bx{flex:none;width:14px;height:14px;border:1px solid #000;border-radius:2px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-family:Tahoma,"Microsoft YaHei",sans-serif;line-height:1}
+.bxt{font-size:8px}
+.kgrid{display:flex;flex-wrap:wrap;gap:3px 4px}
+.kit{width:62px;font-size:12.5px}
+.kit b{margin-right:3px}
+@media print{.toolbar{display:none}.sheet{max-width:none;padding:0}}`;
+}
+function paperPrintHTML(){
+  const title = metaTitle() || '试卷';
+  const sec1 = paper.papers.map((p, i)=>paperSheetHTML(p, i === 0)).join('');
+  const sec2 = paper.papers.map(p=>paperCardHTML(p)).join('');
+  const sec3 = paper.papers.map(p=>paperKeyHTML(p)).join('');
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>${esc(title)}（打印版）</title>
+<style>${paperPrintCSS()}</style>
+</head>
+<body>
+<div class="toolbar"><button class="primary" onclick="window.print()">打印 / 保存 PDF</button><button onclick="window.close()">关闭</button></div>
+${sec1}${sec2}${sec3}
+<script>window.addEventListener('load', function(){ setTimeout(function(){ window.print(); }, 350); });<\/script>
+</body>
+</html>`;
+}
+function paperOpenPrint(){
+  if(!paper || !paper.papers.length) return;
+  const blob = new Blob([paperPrintHTML()], {type:'text/html'});
+  const url = URL.createObjectURL(blob);
+  const w = window.open(url, '_blank');
+  setTimeout(()=>URL.revokeObjectURL(url), 60000);
+  if(!w) alert('浏览器拦截了新窗口，请允许本页面弹出窗口后，再点一次「打印 / 保存 PDF」。');
+}
+
+/* ---- 组卷记录：下载留档 + 导入重印 ---- */
+/* 行数组 -> 最小 xlsx（全部 inlineStr 文本，复用手写 ZIP），供记录导出与测试构造 */
+function ppSheetBlob(sheets){
+  const xe = s => String(s == null ? '' : s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+  const H = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n';
+  const ct = H + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+    + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+    + '<Default Extension="xml" ContentType="application/xml"/>'
+    + sheets.map((_, i)=>`<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')
+    + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+    + '</Types>';
+  const rels = H + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+    + '</Relationships>';
+  const wb = H + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+    + ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>'
+    + sheets.map((s, i)=>`<sheet name="${xe(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`).join('')
+    + '</sheets></workbook>';
+  const wbRels = H + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    + sheets.map((_, i)=>`<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join('')
+    + '</Relationships>';
+  const sheetXml = s => H + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    + `<cols><col min="1" max="${Math.max(1, s.cols || 4)}" width="16" customWidth="1"/></cols>`
+    + '<sheetData>' + s.rows.map((r, ri)=>`<row r="${ri + 1}">` + r.map((v, c)=>
+      `<c r="${dzColName(c)}${ri + 1}" t="inlineStr"><is><t>${xe(v)}</t></is></c>`).join('') + '</row>').join('')
+    + '</sheetData></worksheet>';
+  const enc = new TextEncoder();
+  const files = [
+    ['[Content_Types].xml', ct], ['_rels/.rels', rels],
+    ['xl/workbook.xml', wb], ['xl/_rels/workbook.xml.rels', wbRels],
+    ...sheets.map((s, i)=>[`xl/worksheets/sheet${i + 1}.xml`, sheetXml(s)]),
+  ].map(f=>({name:f[0], data:enc.encode(f[1])}));
+  return dzZip(files);
+}
+function paperRecordRows(){
+  const rows = [['岗位','题型','卷面题号','题库题号','章节','答案']];
+  paper.papers.forEach(p=>{
+    const pos = BANK.positions[p.pi];
+    p.list.forEach((qi, i)=>{
+      const q = qAt(qi);
+      rows.push([pos.name, TYPES[q.t], String(i + 1), String(qi + 1), BANK.chapters[q.ch], paperAnsStr(q)]);
+    });
+  });
+  return rows;
+}
+function paperRecordBlob(){
+  const total = paper.papers.reduce((a, p)=>a + p.list.length, 0);
+  const info = [
+    ['项目','内容'],
+    ['工具标题', metaTitle()],
+    ['生成时间', dzTimeText(paper.at)],
+    ['试卷份数', String(paper.papers.length)],
+    ['每卷题数', String(paper.papers.length ? Math.round(total / paper.papers.length) : 0)],
+    ['题型分布', `单选${PAPER_TYPES[0]} · 多选${PAPER_TYPES[1]} · 判断${PAPER_TYPES[2]}`],
+  ];
+  return ppSheetBlob([
+    {name:'组卷记录', rows:paperRecordRows(), cols:6},
+    {name:'信息', rows:info, cols:2},
+  ]);
+}
+function paperDownloadRecord(){
+  if(!paper || !paper.papers.length) return;
+  const tag = paper.papers.length === 1 ? '_' + BANK.positions[paper.papers[0].pi].name : '';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(paperRecordBlob());
+  a.download = ('组卷记录' + tag + '_' + dzStamp(paper.at)).replace(/[\\/:*?"<>|]/g, '') + '.xlsx';
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+  dzToast('组卷记录已下载，留档备查');
+}
+/* 导入组卷记录原样重印：逐行校验岗位/题号/章节/答案与当前题库一致，
+   不一致说明题库已更新或记录被改动，拒绝重印避免印出错卷。 */
+function paperImportRecord(){
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = '.xlsx';
+  inp.onchange = async ()=>{
+    const f = inp.files && inp.files[0];
+    if(!f) return;
+    try{
+      const sheets = await dzReadXlsx(f);
+      const sh = sheets.find(s=>s.name === '组卷记录') || sheets[0];
+      const rows = sh.rows;
+      const head = rows[0] || [];
+      let cPos = -1, cQno = -1, cIno = -1, cChap = -1, cAns = -1;
+      head.forEach((v, c)=>{
+        const t = String(v == null ? '' : v);
+        if(/岗位/.test(t)) cPos = c;
+        else if(/题库|题目编号/.test(t)) cQno = c;      // 先认题库题号，避免「卷面题号」抢先
+        else if(/卷面|题号/.test(t)) cIno = c;
+        else if(/章节/.test(t)) cChap = c;
+        else if(/答案/.test(t)) cAns = c;
+      });
+      if(cPos < 0 || cQno < 0 || cIno < 0 || cAns < 0)
+        throw new Error('认不出「岗位 / 题库题号 / 卷面题号 / 答案」列，请确认导入的是本工具下载的组卷记录。');
+      const errs = [], byPos = {};
+      for(let r = 1; r < rows.length; r++){
+        const row = rows[r] || [];
+        const posName = String(row[cPos] == null ? '' : row[cPos]).trim();
+        const qnoTxt = String(row[cQno] == null ? '' : row[cQno]).trim();
+        if(!posName && !qnoTxt) continue;
+        const at = `第 ${r + 1} 行`;
+        const pi = BANK.positions.findIndex(p=>p.name === posName);
+        if(pi < 0){ errs.push(`${at}：岗位「${posName}」在当前工具里不存在`); continue; }
+        const qno = Number(qnoTxt);
+        if(!Number.isInteger(qno) || qno < 1 || qno > BANK.q.length){ errs.push(`${at}：题库题号「${qnoTxt}」超出题库范围`); continue; }
+        const qi = qno - 1, q = BANK.q[qi];
+        if(cChap >= 0){
+          const chap = String(row[cChap] == null ? '' : row[cChap]).trim();
+          if(chap && BANK.chapters[q.ch] !== chap){ errs.push(`${at}：章节不符（记录「${chap}」，当前题库为「${BANK.chapters[q.ch]}」）`); continue; }
+        }
+        if(cAns >= 0){
+          const ans = String(row[cAns] == null ? '' : row[cAns]).trim();
+          if(ans && paperAnsStr(q) !== ans){ errs.push(`${at}：答案不符（记录「${ans}」，当前题库为「${paperAnsStr(q)}」）`); continue; }
+        }
+        const ino = Number(String(row[cIno] == null ? '' : row[cIno]).trim());
+        if(!Number.isInteger(ino) || ino < 1){ errs.push(`${at}：卷面题号缺失或不是数字`); continue; }
+        (byPos[pi] || (byPos[pi] = [])).push({ino, qi, at});
+      }
+      if(errs.length){
+        alert('组卷记录无法原样重出：\n' + errs.slice(0, 6).join('\n') + (errs.length > 6 ? `\n……共 ${errs.length} 处` : '')
+          + '\n\n常见原因：题库更新后旧记录不再匹配，请重新生成试卷。');
+        return;
+      }
+      const papers = [];
+      Object.keys(byPos).map(Number).sort((a, b)=>a - b).forEach(pi=>{
+        const items = byPos[pi].sort((a, b)=>a.ino - b.ino);
+        for(let i = 0; i < items.length; i++){
+          if(items[i].ino !== i + 1) throw new Error(`岗位「${BANK.positions[pi].name}」卷面题号不连续（应为 1～${items.length}），记录可能被改动过。`);
+        }
+        papers.push({pi, list: items.map(x=>x.qi)});
+      });
+      if(!papers.length){ alert('记录里没有可用的题目行。'); return; }
+      paper = {at: new Date(), papers};
+      render();
+      paperOpenPrint();
+    }catch(e){
+      alert('导入失败：' + ((e && e.message) || e));
+    }
+  };
+  inp.click();
+}
+
+/* ---- 生成试卷视图 ---- */
+function vPaper(){
+  return paper ? vPaperDone() : vPaperSetup();
+}
+function vPaperSetup(){
+  const sel = st.paperSel || [];
+  const rows = BANK.positions.map((p, i)=>{
+    const pool = poolFor(i);
+    return `<div class="unit-row ${sel.includes(i) ? 'on' : ''}" onclick="paperToggleSel(${i})">
+      <span class="u-box">${sel.includes(i) ? '✓' : ''}</span>
+      <span class="u-name">${esc(p.name)}</span>
+      <span class="u-num num">${pool.A.length + pool.B.length + pool.C.length} 题</span>
+    </div>`;
+  }).join('');
+  return `
+  <div class="exam-topbar">
+    <button class="btn ghost sm" onclick="go('home')">← 返回首页</button>
+  </div>
+  <div class="sec-title"><span class="diamond"></span><h2>生成试卷</h2></div>
+  <div class="card dz-card">
+    <div class="es-notice" style="margin:0 0 16px">勾选岗位，每个岗位出一套纸质试卷：单选 ${PAPER_TYPES[0]} 题 + 多选 ${PAPER_TYPES[1]} 题 + 判断 ${PAPER_TYPES[2]} 题，每题 1 分共 80 分，与线上模拟考试同一套抽题口径。每套包含<b>空白试卷、答题卡、参考答案</b>三部分，打印时按材料分开取用。</div>
+    <div class="panel-title">选择岗位</div>
+    <div class="dz-row" style="margin:10px 0 12px">
+      <button class="btn ghost sm" onclick="paperSelAll(true)">全选</button>
+      <button class="btn ghost sm" onclick="paperSelAll(false)">清空</button>
+    </div>
+    <div class="type-panel" style="gap:9px">${rows}</div>
+    <div class="es-actions" style="position:static;background:none;padding:20px 0 0">
+      <button class="btn ghost" onclick="paperImportRecord()">按记录重印</button>
+      <button class="btn primary" onclick="paperGenerate()" ${sel.length ? '' : 'disabled'}>生成试卷${sel.length ? `（${sel.length} 个岗位）` : ''}</button>
+    </div>
+    <div class="dz-note">要加印之前出过的卷子？点「按记录重印」，导入当时下载的组卷记录，就能印出一模一样的卷子。</div>
+  </div>`;
+}
+function vPaperDone(){
+  const chips = paper.papers.map(p=>
+    `<span class="dz-chip">${esc(BANK.positions[p.pi].name)}<em>${p.list.length} 题</em></span>`).join('');
+  return `
+  <div class="exam-topbar">
+    <button class="btn ghost sm" onclick="paper=null;render()">← 重新选择岗位</button>
+    <div class="et-info"><span class="exam-pos">${dzTimeText(paper.at)} 生成</span></div>
+  </div>
+  <div class="sec-title"><span class="diamond"></span><h2>试卷已生成</h2></div>
+  <div class="card dz-card">
+    <div class="dz-row">${chips}</div>
+    <div class="es-actions" style="position:static;background:none;padding:20px 0 4px">
+      <button class="btn primary" onclick="paperOpenPrint()">打印 / 保存 PDF</button>
+      <button class="btn ghost" onclick="paperDownloadRecord()">下载组卷记录</button>
+    </div>
+    <div class="dz-note">打印窗口里选打印机即可印卷，选「另存为 PDF」可存档。组卷记录请留档：加印时导入它即可原样重出，不会变成另一套题。<b>答案部分在文档最后，请单独取走，不要随空白卷一起下发。</b></div>
+  </div>`;
 }
 
 render();
