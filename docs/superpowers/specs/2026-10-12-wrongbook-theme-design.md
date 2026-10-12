@@ -76,7 +76,7 @@
 
 ## 错误处理
 
-- `localStorage('theme')` 读到非法值时按 `'auto'` 处理。
+- `localStorage('exam_tool_theme_v1')` 读到非法值时按 `'auto'` 处理。
 - 错题记录中 `ua` 含失效字母（题库更新导致选项数变化）时，展示层只标注仍存在的错选项，不报错（题库题号校验已有 `qi < BANK.q.length` 兜底，选项级异常仅影响展示不影响功能）。
 - `matchMedia` 不可用（极老内核）时按深色处理，不阻塞初始化。
 
