@@ -34,7 +34,8 @@ const docEl = fakeEl();
 Object.defineProperty(docEl, 'outerHTML', { get(){ return `<html><body>${document.getElementById('bankRec').textContent}</body></html>`; } });
 document.documentElement = docEl;
 global.localStorage = { getItem(k){ return store[k]||null; }, setItem(k,v){ store[k]=String(v); }, removeItem(k){ delete store[k]; } };
-global.confirm = () => true;
+let confirmResult = true;
+global.confirm = () => confirmResult;
 global.alert = () => {};
 global.navigator = {};
 global.window = { scrollTo(){}, addEventListener(){} };
@@ -45,7 +46,7 @@ global.matchMedia = global.window.matchMedia;
 global.requestAnimationFrame = cb => cb();
 global.cancelAnimationFrame = () => {};
 
-eval(script + '\n;globalThis.__h={bank:()=>BANK, exam:()=>exam, st:()=>st, view:()=>view, setExam:v=>{exam=v;}, pw:()=>pw, resetPw:()=>{pw={};}, practice:()=>practice, fileId:()=>FILE_ID, setPending:v=>{recPending=v;}, getPending:()=>recPending, recHandle:()=>recHandle, setHandle:v=>{recHandle=v;}, snap:()=>recSnap, themePref:()=>themePref(), cycleTheme:()=>cycleTheme(), themeBtnHTML:()=>vHome()};');
+eval(script + '\n;globalThis.__h={bank:()=>BANK, exam:()=>exam, st:()=>st, view:()=>view, setExam:v=>{exam=v;}, pw:()=>pw, resetPw:()=>{pw={};}, practice:()=>practice, fileId:()=>FILE_ID, setPending:v=>{recPending=v;}, getPending:()=>recPending, recHandle:()=>recHandle, setHandle:v=>{recHandle=v;}, snap:()=>recSnap, themePref:()=>themePref(), cycleTheme:()=>cycleTheme(), themeBtnHTML:()=>vHome(), setConfirm:v=>{confirmResult=v;}};');
 
 let fails = 0;
 const ok = (cond,msg)=>{ console.log(`  [${cond?'PASS':'FAIL'}] ${msg}`); if(!cond) fails++; };
@@ -261,6 +262,23 @@ __h.resetPw();
 __h.setExam(mkExam());
 submitExam();
 ok(__h.exam().score===0, '未作答得 0 分');
+
+// 7.5) confirm 取消不交卷；到时自动交卷（auto=true）跳过确认
+__h.setExam(mkExam());
+__h.setConfirm(false);
+submitExam();
+ok(__h.exam().done===false, 'confirm 返回 false 时 submitExam() 不交卷');
+// 答错第 0 题（构造一个确定错误的答案）
+{ const q=BANK.q[__h.exam().paper[0]];
+  if(q.t===2) __h.exam().ans[__h.exam().paper[0]]=[q.a==='对'?'错':'对'];
+  else if(q.t===0){ const L=LETTERS.find(l=>!q.a.includes(l)); __h.exam().ans[__h.exam().paper[0]]=[L]; }
+  else { const L=LETTERS.find(l=>!q.a.includes(l)); __h.exam().ans[__h.exam().paper[0]]=[L]; } }
+__h.resetPw();
+submitExam(true);
+ok(__h.exam().done===true, 'submitExam(true) 在 confirm=false 下仍完成交卷');
+ok(__h.pw()[__h.st().pos] && Object.keys(__h.pw()[__h.st().pos]).length===1, '自动交卷答错题入错题本(pw 有记录)');
+__h.setConfirm(true);
+__h.resetPw();
 
 // 8) 首页导航与刷题范围设置
 ok(__h.st().mode==='exam', '默认模式为模拟考试');

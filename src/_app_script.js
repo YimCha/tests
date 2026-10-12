@@ -715,12 +715,12 @@ function judgeOK(q, ua){
   if(q.t===0) return ua.length===1 && ua[0]===q.a;
   return ua.length===1 && ((ua[0]==='对')===(q.a==='对'));
 }
-function submitExam(){
+function submitExam(auto){
   if(!exam || exam.done) return;
   const answered = Object.keys(exam.ans).filter(k=>exam.ans[k]&&exam.ans[k].length).length;
   const marked = Object.keys(exam.mark).length;
   const un = exam.paper.length - answered;
-  if(!confirm(`已答 ${answered} 题 · 未答 ${un} 题${marked?` · 标记 ${marked} 题`:''}\n确定交卷？`)) return;
+  if(!auto && !confirm(`已答 ${answered} 题 · 未答 ${un} 题${marked?` · 标记 ${marked} 题`:''}\n确定交卷？`)) return;
   let score=0;
   const stt={A:{g:0,f:0},B:{g:0,f:0},C:{g:0,f:0}}, tst={0:{g:0,f:0},1:{g:0,f:0},2:{g:0,f:0}};
   exam.paper.forEach(qi=>{
@@ -749,7 +749,7 @@ function examTimerLoop(){
     if(left<=0){
       const el=document.getElementById('examTimer');
       if(el) el.textContent='00:00:00';
-      submitExam(); return;
+      submitExam(true); return;
     }
     const el=document.getElementById('examTimer');
     if(el){ el.textContent=fmtTime(left); el.classList.toggle('warn', left<=300); }

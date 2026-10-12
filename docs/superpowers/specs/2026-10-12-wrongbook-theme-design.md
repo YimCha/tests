@@ -41,7 +41,7 @@
 
 **切换逻辑（_app_script.js 单源）**
 
-- 存储 key：`localStorage('theme')`，取值 `'light' | 'dark' | 'auto'`（缺省 `'auto'`）。
+- 存储 key：`localStorage('exam_tool_theme_v1')`，取值 `'light' | 'dark' | 'auto'`（缺省 `'auto'`）。
 - 应用规则：`auto` 时按 `window.matchMedia('(prefers-color-scheme: light)')` 决定 `data-theme`；`light`/`dark` 直接设置。
 - 监听 `matchMedia` 的 change 事件，仅当当前处于 `auto` 态时跟随刷新。
 - 入口按钮位于首页右上角（与「抽签」「生成试卷」入口同区域），循环切换三态并即时生效；按钮文案用日常说法（如「主题：跟随系统 / 浅色 / 深色」），不出现技术术语。
