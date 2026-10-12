@@ -40,6 +40,33 @@ function pSave(){
   updateRecBar();
 }
 
+/* ---- 主题三态（跟随系统/浅色/深色），存 localStorage，全站唯一入口 ---- */
+const THEME_KEY = 'exam_tool_theme_v1';
+function themePref(){
+  try{ const v = localStorage.getItem(THEME_KEY);
+    return (v==='light'||v==='dark') ? v : 'auto'; }catch(e){ return 'auto'; }
+}
+function themeLabel(p){
+  return {auto:'主题：跟随系统', light:'主题：浅色', dark:'主题：深色'}[p] || '主题：跟随系统';
+}
+function applyTheme(){
+  const p = themePref();
+  let t = p;
+  if(p==='auto'){
+    let light = false;
+    try{ if(window.matchMedia) light = !!window.matchMedia('(prefers-color-scheme: light)').matches; }catch(e){}
+    t = light ? 'light' : 'dark';
+  }
+  document.documentElement.setAttribute('data-theme', t);
+}
+function cycleTheme(){
+  const next = {auto:'light', light:'dark', dark:'auto'}[themePref()] || 'auto';
+  try{ localStorage.setItem(THEME_KEY, next); }catch(e){}
+  applyTheme();
+  const btn = document.getElementById('themeBtn');
+  if(btn) btn.innerHTML = themeLabel(next);
+}
+
 /* ---- 写回本文件（File System Access API，Chromium 专属） ---- */
 function recDB(){ return new Promise((res, rej)=>{
   const req = indexedDB.open('exam_tool_rec_v1', 1);
@@ -248,6 +275,7 @@ function setMode(m){ st.mode=m; save(); render(); }
 function vHome(){
   const tabs = [['exam','模拟考试'],['practice','刷题练习'],['wrong','错题本']].map(t=>
     `<button class="top-tab ${st.mode===t[0]?'on':''}" onclick="setMode('${t[0]}')">${t[1]}</button>`).join('')
+    + `<button class="top-tab" id="themeBtn" onclick="cycleTheme()">${themeLabel(themePref())}</button>`
     + `<button class="top-tab tab-far" onclick="paperEnter()">生成试卷</button><button class="top-tab" onclick="dzEnter()">抽签</button>`;
   const title = {exam:'请选择考试岗位', practice:'选择岗位 · 刷题练习', wrong:'选择岗位 · 错题本'}[st.mode];
   let cards;
@@ -2302,6 +2330,15 @@ function vPaperDone(){
     <div class="dz-note">打印窗口里选打印机即可印卷，选「另存为 PDF」可存档。组卷记录请留档：加印时导入它即可原样重出，不会变成另一套题。<b>答案部分在文档最后，请单独取走，不要随空白卷一起下发。</b></div>
   </div>`;
 }
+
+// 主题初始化：按偏好上主题色；auto 态注册系统偏好变化监听（注册前判存在，回调内再校验偏好）
+applyTheme();
+try{
+  if(window.matchMedia){
+    const mq = window.matchMedia('(prefers-color-scheme: light)');
+    if(mq && mq.addEventListener) mq.addEventListener('change', ()=>{ if(themePref()==='auto') applyTheme(); });
+  }
+}catch(e){}
 
 render();
 if(view==='exam' && exam) examTimerLoop();

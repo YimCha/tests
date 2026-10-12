@@ -80,6 +80,8 @@ function elStub(id) {
     style: {}, dataset: {},
     classList: { toggle() {}, add() {}, remove() {} },
     addEventListener() {}, appendChild() {}, removeChild() {}, click() {}, select() {},
+    setAttribute(k, v) { (this._attrs = this._attrs || {})[k] = v; },
+    getAttribute(k) { return (this._attrs || {})[k] ?? null; },
   });
 }
 let lastInput = null, elSeq = 0;
@@ -95,8 +97,13 @@ const documentStub = {
     return e;
   },
   body: { appendChild() {}, removeChild() {} },
-  documentElement: { outerHTML: '<html></html>' },
+  documentElement: {
+    outerHTML: '<html></html>',
+    setAttribute(k, v) { (this._attrs = this._attrs || {})[k] = v; },
+    getAttribute(k) { return (this._attrs || {})[k] ?? null; },
+  },
 };
+const matchMediaResult = { matches: false, addEventListener() {}, removeEventListener() {} };
 const sandbox = {
   console, setTimeout, clearTimeout, setInterval, clearInterval, performance,
   TextDecoder, TextEncoder, Blob, Response, DecompressionStream, URL,
@@ -113,6 +120,7 @@ const sandbox = {
   alert(m) { alerts.push(String(m)); },
   confirm() { return true; },
   requestAnimationFrame(fn) { fn(); },
+  matchMedia() { return matchMediaResult; },
   indexedDB: { open() { throw new Error('idb unavailable in test'); } },
   open() { return { close() {} }; },   // window.open stub：打印窗口在测试里不可见
   BANK: null,

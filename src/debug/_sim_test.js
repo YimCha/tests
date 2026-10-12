@@ -17,6 +17,8 @@ const fakeEl = () => {
     appendChild(){}, addEventListener(t,c){ (this._ls[t]=this._ls[t]||[]).push(c); },
     querySelectorAll(){ return []; }, querySelector(){ return null; }, closest(){ return null; },
     set innerHTML(v){ this._h=v; }, get innerHTML(){ return this._h; },
+    setAttribute(k,v){ (this._attrs=this._attrs||{})[k]=v; },
+    getAttribute(k){ return (this._attrs||{})[k] ?? null; },
   };
 };
 global.document = {
@@ -36,10 +38,14 @@ global.confirm = () => true;
 global.alert = () => {};
 global.navigator = {};
 global.window = { scrollTo(){}, addEventListener(){} };
+// window 增加 matchMedia 桩（默认浅色匹配，测试内可改）：
+global.matchMediaResult = { matches:false, addEventListener(){}, removeEventListener(){} };
+global.window.matchMedia = ()=>global.matchMediaResult;
+global.matchMedia = global.window.matchMedia;
 global.requestAnimationFrame = cb => cb();
 global.cancelAnimationFrame = () => {};
 
-eval(script + '\n;globalThis.__h={bank:()=>BANK, exam:()=>exam, st:()=>st, view:()=>view, setExam:v=>{exam=v;}, pw:()=>pw, resetPw:()=>{pw={};}, practice:()=>practice, fileId:()=>FILE_ID, setPending:v=>{recPending=v;}, getPending:()=>recPending, recHandle:()=>recHandle, setHandle:v=>{recHandle=v;}, snap:()=>recSnap};');
+eval(script + '\n;globalThis.__h={bank:()=>BANK, exam:()=>exam, st:()=>st, view:()=>view, setExam:v=>{exam=v;}, pw:()=>pw, resetPw:()=>{pw={};}, practice:()=>practice, fileId:()=>FILE_ID, setPending:v=>{recPending=v;}, getPending:()=>recPending, recHandle:()=>recHandle, setHandle:v=>{recHandle=v;}, snap:()=>recSnap, themePref:()=>themePref(), cycleTheme:()=>cycleTheme(), themeBtnHTML:()=>vHome()};');
 
 let fails = 0;
 const ok = (cond,msg)=>{ console.log(`  [${cond?'PASS':'FAIL'}] ${msg}`); if(!cond) fails++; };
@@ -400,6 +406,20 @@ __h.setPending(mkHandle('{}'));
 await resumeRecSave();
 ok(__h.recHandle() && __h.recHandle().kind==='file', '记录一致时正常恢复自动保存');
 __h.setHandle(null); __h.setPending(null);
+
+// 19) 主题三态切换（brief 原编号 18，因已有 18) 段顺延为 19)
+document.documentElement._attrs = {};          // 清空起始主题
+localStorage.setItem('exam_tool_theme_v1','bogus');
+applyTheme();
+ok(themePref()==='auto', '非法存储值按 auto 处理');
+ok(document.documentElement.getAttribute('data-theme')!=='light', 'auto+深色系统偏好 → 非 light');
+global.matchMediaResult.matches = true; applyTheme();
+ok(document.documentElement.getAttribute('data-theme')==='light', 'auto 跟随系统浅色');
+cycleTheme(); ok(themePref()==='light' && localStorage.getItem('exam_tool_theme_v1')==='light', '循环到 light 并持久化');
+cycleTheme(); ok(themePref()==='dark', '循环到 dark');
+cycleTheme(); ok(themePref()==='auto', '循环回 auto');
+ok(vHome().includes('themeBtn') && vHome().includes('cycleTheme()'), '首页含主题切换按钮');
+ok(vHome().includes('跟随系统')||vHome().includes('主题：'), '按钮文案为日常说法');
 
 console.log(fails? `\n存在 ${fails} 个 FAIL`:'\n全部 PASS');
 process.exit(fails?1:0);
