@@ -13,3 +13,6 @@ __pycache__/
 
 # 工作区记忆（含业务信息，不提交）
 .workbuddy/
+
+# SDD 过程档案（ledger/快照/审查包）
+.superpowers/
