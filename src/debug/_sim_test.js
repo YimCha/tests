@@ -1,0 +1,406 @@
+const fs = require('fs');
+const path = require('path');
+const outMeta = JSON.parse(fs.readFileSync(path.join(__dirname, '_output.json'), 'utf-8'));
+const html = fs.readFileSync(path.join(__dirname, '..', '..', outMeta.file), 'utf-8');
+const script = html.split('<script>').slice(1).map(s=>s.split('</script>')[0]).join('\n');
+
+// 最小 DOM 桩（classList 真实可断言，支持事件监听存储与分发）
+const store = {};
+const fakeEl = () => {
+  const cls = new Set();
+  return {
+    _h:'', innerHTML:'', className:'', dataset:{}, style:{}, _ls:{}, _cls:cls,
+    textContent:'{}', outerHTML:'<html></html>',
+    classList:{ add:c=>cls.add(c), remove:c=>cls.delete(c),
+      toggle:c=>cls.has(c)?(cls.delete(c),false):(cls.add(c),true),
+      contains:c=>cls.has(c) },
+    appendChild(){}, addEventListener(t,c){ (this._ls[t]=this._ls[t]||[]).push(c); },
+    querySelectorAll(){ return []; }, querySelector(){ return null; }, closest(){ return null; },
+    set innerHTML(v){ this._h=v; }, get innerHTML(){ return this._h; },
+  };
+};
+global.document = {
+  _els:{},
+  getElementById(id){ if(!this._els[id]) this._els[id]=fakeEl(); return this._els[id]; },
+  createElement(){ return fakeEl(); },
+  body:{ appendChild(){} },
+  querySelector(){ return fakeEl(); },
+  querySelectorAll(){ return []; },
+};
+// documentElement.outerHTML 动态反映 #bankRec 记录区内容（模拟真实 DOM 序列化）
+const docEl = fakeEl();
+Object.defineProperty(docEl, 'outerHTML', { get(){ return `<html><body>${document.getElementById('bankRec').textContent}</body></html>`; } });
+document.documentElement = docEl;
+global.localStorage = { getItem(k){ return store[k]||null; }, setItem(k,v){ store[k]=String(v); }, removeItem(k){ delete store[k]; } };
+global.confirm = () => true;
+global.alert = () => {};
+global.navigator = {};
+global.window = { scrollTo(){}, addEventListener(){} };
+global.requestAnimationFrame = cb => cb();
+global.cancelAnimationFrame = () => {};
+
+eval(script + '\n;globalThis.__h={bank:()=>BANK, exam:()=>exam, st:()=>st, view:()=>view, setExam:v=>{exam=v;}, pw:()=>pw, resetPw:()=>{pw={};}, practice:()=>practice, fileId:()=>FILE_ID, setPending:v=>{recPending=v;}, getPending:()=>recPending, recHandle:()=>recHandle, setHandle:v=>{recHandle=v;}, snap:()=>recSnap};');
+
+let fails = 0;
+const ok = (cond,msg)=>{ console.log(`  [${cond?'PASS':'FAIL'}] ${msg}`); if(!cond) fails++; };
+const BANK = __h.bank();
+const clsOfPaper = paper => { const a={A:0,B:0,C:0}; paper.forEach(qi=>{ const ch=BANK.chapters[BANK.q[qi].ch]; a[ch.endsWith('A类')?'A':(ch.endsWith('B类')?'B':'C')]++; }); return a; };
+
+// 1) 设置页渲染
+const setup = vExamSetup();
+ok(setup.includes('题库外') && setup.includes('80'), '设置页含题库外20分说明与80分提示');
+ok(setup.includes('模拟考试 · 柜员岗'), '设置页显示岗位');
+const pos0 = BANK.positions[0];
+ok((setup.match(/id="rule[ABC]/g)||[]).length === 1+pos0.b.length+pos0.c.length, '设置页抽取规则行数 = A类合集+B类组+C类组');
+ok(setup.includes('info-card') && setup.includes('icTotal') && setup.includes('ic-name'), '设置页含考试信息卡');
+ok(setup.includes('type-panel') && setup.includes('tp0') && setup.includes('题型题量'), '设置页含题型题量设置');
+ok(!setup.includes('重新组卷'), '设置页无重新组卷按钮');
+ok(setup.includes('重新选择岗位'), '设置页含重新选择岗位返回按钮');
+
+// 1.5) 点岗位卡片直接进入考试确认页
+setPos(1);
+ok(__h.st().pos===1 && __h.view()==='exam', '点击岗位卡片直接进入考试确认页');
+ok(__h.st().rule===null, '切换岗位后抽取规则重置为方案默认');
+
+// 1.6) 抽取规则设置区
+const setup2 = vExamSetup();
+ok(setup2.includes('ruleA') && setup2.includes('ruleTotal') && setup2.includes('抽取规则'), '设置页含抽取规则设置区');
+ok(setup2.includes('所有部门 A 类题合集') && setup2.includes('ruleB0'), '抽取规则区含 A 类合集与 B 类部门组');
+ok(setup2.includes('icTotal') && setup2.includes('icRule') && setup2.includes('icDur'), '信息卡含题量/分值/时长动态元素');
+
+// 1.7) 考试时长设置
+ok(setup.includes('durInput') && setup.includes('考试时长'), '设置页含考试时长设置');
+ok(!setup.includes('限时 60 分钟'), '已删除限时静态文本');
+ok(__h.st().dur===60, '考试时长默认 60 分钟');
+
+// 1.8) 折叠设置
+ok(setup.includes('setup-toggle') && setup.includes('setupPanel'), '设置页含折叠设置区');
+ok(setup.includes('display:none'), '自定义设置默认收起');
+
+// 2) 组卷比例 + 题型构成 + 排序
+const p0 = BANK.positions[0];
+const T0 = __h.st().types;
+const rule0 = {A:p0.ratio[0], B:p0.b.map(g=>g[1]), C:p0.c.map(g=>g[1])};
+const paper = genPaper(0, T0, rule0);
+const a = clsOfPaper(paper);
+ok(a.A===p0.ratio[0]&&a.B===p0.ratio[1]&&a.C===p0.ratio[2], `柜员岗组卷 A/B/C 分值符合方案(${p0.ratio.join('/')})`);
+const tc = [0,1,2].map(t=>paper.filter(qi=>BANK.q[qi].t===t).length);
+ok(tc.join()===T0.join(), `组卷题型数量符合设置(${T0.join('/')}，实际 ${tc.join('/')})`);
+const ts = paper.map(qi=>BANK.q[qi].t);
+ok(ts.every((t,i)=>i===0||t>=ts[i-1]), '试题按 单选→多选→判断 顺序排序');
+
+// 2.5) 矩阵分配：不同题型组合下行(题型)/列(方案)约束均满足
+const units = (()=>{ const pos=BANK.positions[0], u=[pos.ratio[0]];
+  pos.b.forEach(g=>u.push(g[1])); pos.c.forEach(g=>u.push(g[1])); return u; })();
+[[40,25,15],[32,32,16],[50,20,10],[60,15,5],[80,0,0]].forEach(tt=>{
+  const M=genMatrix(tt, units);
+  const rowOK = M.every((row,t)=>row.reduce((a,b)=>a+b,0)===tt[t]);
+  const colOK = units.every((n,c)=>M.reduce((a,row)=>a+row[c],0)===n);
+  ok(rowOK&&colOK, `题型${tt.join('/')} 矩阵行(题型)/列(方案)约束均满足`);
+});
+
+// 2.6) 组卷总题数恒为 80（某部门题型池不足时用其他题型补足，修复79题bug）
+ok(genPaper(0,T0,rule0).length===80 && genPaper(0,[32,32,16],rule0).length===80 && genPaper(0,[50,20,10],rule0).length===80, '不同题型组合下组卷总题数恒为 80');
+let all80=true;
+for(let k=0;k<20;k++){ if(genPaper(0,T0,rule0).length!==80) all80=false; }
+ok(all80, '随机组卷20次总题数均=80');
+
+// 2.7) 自定义抽取规则组卷
+const ruleCustom = {A:rule0.A+5, B:rule0.B.map((v,i)=>i===0?v-5:v), C:[...rule0.C]};
+ok(ruleCustom.A+ruleCustom.B.reduce((a,b)=>a+b,0)+ruleCustom.C.reduce((a,b)=>a+b,0)===80, '自定义抽取规则合计=80');
+const paperC = genPaper(0, T0, ruleCustom);
+const aC = clsOfPaper(paperC);
+ok(aC.A===ruleCustom.A && aC.B===ruleCustom.B.reduce((a,b)=>a+b,0) && aC.C===ruleCustom.C.reduce((a,b)=>a+b,0), '自定义抽取规则组卷 A/B/C 符合');
+
+const mkExam = ()=> ({paper:genPaper(0, __h.st().types, rule0), rule:rule0, cur:0, ans:{}, mark:{}, start:Date.now(), dur:60*60, done:false});
+__h.st().pos = 0; // 与 genPaper(0) 的岗位一致，统计卡按同岗位部门组统计
+__h.setExam(mkExam());
+const run = vExamRun();
+ok(run.includes('examNav') && run.includes('examStat'), '考试页含答题卡与实际抽取卡');
+ok(run.includes('et-info') && run.includes('exam-timer') && run.includes('exam-pos') && run.includes('exam-done'), '答题页顶部栏含计时/进度/已答');
+ok(!run.includes('submitExam()'), '顶部栏无交卷按钮');
+drawExam();
+ok((document.getElementById('examNav').innerHTML.match(/class="[^"]*on[^"]*"/g)||[]).length>=1, '答题卡含当前题高亮');
+const navHtml = document.getElementById('examNav').innerHTML;
+ok(navHtml.includes('单选题') && navHtml.includes('多选题') && navHtml.includes('判断题'), '答题卡按钮含题型标注(单/多/判)');
+ok(!navHtml.includes('class="cl"') && !/>[ABC]<\/i>/.test(navHtml), '答题卡按钮无 ABC 类别标注');
+const box = document.getElementById('examBox').innerHTML;
+ok(!box.includes('examTimer') && !box.includes('q-status'), '题目卡底部已无状态条');
+ok(box.includes('submitExam()') && box.includes('nextExam()') && box.includes('prevExam()') && box.includes('toggleMark()'), '题目卡底部含交卷/上一题/标记/下一题按钮');
+__h.exam().cur = __h.exam().paper.length-1; drawExam();
+const lastBox = document.getElementById('examBox').innerHTML;
+ok(lastBox.includes('submitExam()') && !lastBox.includes('nextExam()'), '最后一题时交卷按钮保留、下一题消失');
+__h.exam().cur = 0; drawExam();
+const statHtml = document.getElementById('examStat').innerHTML;
+ok(statHtml.includes('本次实际抽取') && statHtml.includes('题 / 要求'), '实际抽取卡显示实际题数/方案要求题数');
+ok(statHtml.includes('A类') && statHtml.includes('B类合计') && statHtml.includes('C类合计'), '实际抽取卡按 A/B/C 分类展示小计');
+ok((statHtml.match(/题 \/ 要求 \d+ 题/g)||[]).length===3+p0.b.length+p0.c.length, `实际抽取卡覆盖 A/B/C小计+部门组 共${3+p0.b.length+p0.c.length}行`);
+
+// 3.5) 选项点击：事件委托只绑定一次，点击可选中/取消/切换
+const appEl = document.getElementById('app');
+ok((appEl._ls['click']||[]).length===1, '选项事件委托只绑定一次（防重复绑定）');
+const q0 = paper[0], q0q = BANK.q[q0];
+const optA = fakeEl(); optA.dataset.qi=String(q0); optA.dataset.key='A';
+const optB = fakeEl(); optB.dataset.qi=String(q0); optB.dataset.key='B';
+let curSel = null;
+const cardEl = fakeEl();
+cardEl.querySelectorAll = ()=>[optA,optB];
+cardEl.querySelector = sel => sel==='.opt.sel' ? ([optA,optB].find(o=>o._cls.has('sel'))||null) : null;
+optA.closest = sel => sel==='.opt' ? optA : (sel==='.q-card' ? cardEl : null);
+optB.closest = sel => sel==='.opt' ? optB : (sel==='.q-card' ? cardEl : null);
+const click = target => (appEl._ls['click']||[]).forEach(cb=>cb({target}));
+const syncSel = ()=>{ curSel=[optA,optB].find(o=>o._cls.has('sel'))||null; };
+__h.setExam(mkExam());
+__h.exam().cur = 0;
+click(optA); syncSel();
+ok(curSel===optA && __h.exam().ans[q0] && __h.exam().ans[q0][0]==='A', '点击选项A选中并写入答案');
+click(optA); syncSel();
+ok(curSel===null && !__h.exam().ans[q0], '再次点击取消选中并清除答案');
+click(optB); syncSel();
+ok(curSel===optB && __h.exam().ans[q0] && __h.exam().ans[q0][0]==='B', '点击选项B切换选中');
+
+// 3.6) 多选题可多选、判断题互斥
+const mkOptStub = (qi, keys)=>{
+  const card = fakeEl();
+  const opts = keys.map(k=>{ const o=fakeEl(); o.dataset.qi=String(qi); o.dataset.key=k;
+    o.closest=s=>s==='.opt'?o:(s==='.q-card'?card:null); return o; });
+  card.querySelectorAll = sel => sel==='.opt.sel' ? opts.filter(o=>o._cls.has('sel')) : opts;
+  card.querySelector = sel => sel==='.opt.sel' ? (opts.find(o=>o._cls.has('sel'))||null) : null;
+  const clickOpt = o=> (appEl._ls['click']||[]).forEach(cb=>cb({target:o}));
+  return {card, opts, clickOpt};
+};
+const qMulti = paper.find(qi=>BANK.q[qi].t===1);
+{
+  const {opts, clickOpt} = mkOptStub(qMulti, ['A','B','C','D']);
+  __h.setExam(mkExam()); __h.exam().cur = 0;
+  clickOpt(opts[0]);
+  ok(opts[0]._cls.has('sel') && __h.exam().ans[qMulti].includes('A'), '多选点击A选中');
+  clickOpt(opts[1]);
+  ok(opts[0]._cls.has('sel') && opts[1]._cls.has('sel') && __h.exam().ans[qMulti].join('')==='AB', '多选可同时选中A和B');
+  clickOpt(opts[0]);
+  ok(!opts[0]._cls.has('sel') && opts[1]._cls.has('sel') && __h.exam().ans[qMulti].join('')==='B', '多选再次点击A取消A');
+}
+const qJudge = paper.find(qi=>BANK.q[qi].t===2);
+{
+  const {opts, clickOpt} = mkOptStub(qJudge, ['对','错']);
+  __h.setExam(mkExam()); __h.exam().cur = 0;
+  clickOpt(opts[0]);
+  ok(opts[0]._cls.has('sel') && __h.exam().ans[qJudge][0]==='对', '判断题点击"对"选中');
+  clickOpt(opts[1]);
+  ok(!opts[0]._cls.has('sel') && opts[1]._cls.has('sel') && __h.exam().ans[qJudge][0]==='错', '判断题"错"互斥替换"对"');
+}
+
+// 4) 标记功能
+toggleMark();
+ok(__h.exam().mark[__h.exam().paper[__h.exam().cur]]===1, '标记本题生效');
+toggleMark();
+ok(__h.exam().mark[__h.exam().paper[__h.exam().cur]]===undefined, '取消标记生效');
+
+// 5) 全对 → 80 分
+__h.setExam(mkExam());
+__h.exam().paper.forEach(qi=>{ const q=BANK.q[qi];
+  __h.exam().ans[qi] = q.t===1 ? [...q.a] : [q.a]; });
+submitExam();
+ok(__h.exam().score===80, '全部答对得 80 分');
+ok(__h.exam().done===true, '交卷后 done=true');
+const res = vExamResult();
+ok(res.includes('80') && res.includes('答题详情'), '成绩报告含分数与答题详情');
+ok((res.match(/review-row/g)||[]).length===__h.exam().paper.length, '成绩报告逐题列出全部题目');
+ok(res.includes('分题型得分') && res.includes('分 A/B/C 得分'), '成绩报告含分题型/分A/B/C得分');
+// 复查详情：单选/多选/判断
+const ex = __h.exam();
+const qiS = ex.paper.find(qi=>BANK.q[qi].t===0), qiM = ex.paper.find(qi=>BANK.q[qi].t===1), qiJ = ex.paper.find(qi=>BANK.q[qi].t===2);
+ok(reviewDetail(qiS).includes('正确答案'), '单选复查含正确答案');
+ok(reviewDetail(qiM).includes('你的答案'), '多选复查含你的答案');
+ok(reviewDetail(qiJ).includes('对') && reviewDetail(qiJ).includes('错'), '判断复查含对/错选项');
+
+// 6) 一半答错 → 得分小于80
+__h.setExam(mkExam());
+const LETTERS=['A','B','C','D','E','F','G','H'];
+__h.exam().paper.forEach((qi,i)=>{ const q=BANK.q[qi];
+  if(i%2===0){ __h.exam().ans[qi] = q.t===1 ? [...q.a] : [q.a]; }  // 一半答对
+  else {  // 一半答错
+    let wrong;
+    if(q.t===2) wrong=[q.a==='对'?'错':'对'];
+    else wrong=[LETTERS.find(L=>!q.a.includes(L))];
+    __h.exam().ans[qi]=wrong;
+  }
+});
+submitExam();
+ok(__h.exam().score>0 && __h.exam().score<80, `一半答错得分介于0~80(实际 ${__h.exam().score})`);
+
+// 6.5) 模拟考试答错入错题本（同刷题口径），未作答不入
+__h.resetPw();
+__h.setExam(mkExam());
+const paper1 = __h.exam().paper.slice();
+const wrongQ = [];
+__h.exam().paper.forEach((qi,i)=>{ const q=BANK.q[qi];
+  if(i%3===0){ let w; if(q.t===2) w=[q.a==='对'?'错':'对']; else w=[LETTERS.find(L=>!q.a.includes(L))];
+    __h.exam().ans[qi]=w; wrongQ.push(qi); } });
+submitExam();
+ok(__h.exam().done, '交卷完成');
+wrongQ.forEach(qi=>{ const r=__h.pw()[__h.st().pos][qi];
+  ok(r && r.fails===1 && Array.isArray(r.ua), '考试答错入错题本 fails=1 且含 ua'); });
+ok(Object.keys(__h.pw()[__h.st().pos]||{}).length===wrongQ.length, '未作答题不产生记录');
+// 第二场再错同一题，次数累计（沿用同卷面，保证该题在卷内：生产路径中仅卷内题会被判分记录）
+__h.setExam(mkExam());
+__h.exam().paper = paper1.slice();
+const qAgain = wrongQ[0];
+__h.exam().ans[qAgain] = (()=>{ const q=qAt(qAgain); return q.t===2?[q.a==='对'?'错':'对']:[LETTERS.find(L=>!q.a.includes(L))]; })();
+submitExam();
+ok(__h.pw()[__h.st().pos][qAgain].fails===2, '多场考试错同一题次数累计');
+__h.resetPw();
+
+// 7) 全不答 → 0 分（确认框被桩接受）
+__h.setExam(mkExam());
+submitExam();
+ok(__h.exam().score===0, '未作答得 0 分');
+
+// 8) 首页导航与刷题范围设置
+ok(__h.st().mode==='exam', '默认模式为模拟考试');
+setMode('practice');
+ok(__h.st().mode==='practice', '可切换到刷题练习模式');
+ok(vHome().includes('刷题练习') && vHome().includes('错题本'), '首页含模拟考试/刷题练习/错题本入口');
+const stA = __h.st(); stA.pos=0; save();
+const pset = vPracticeSetup();
+ok(pset.includes('练习范围') && pset.includes('随机混合') && pset.includes('按章节顺序'), '刷题设置页含练习范围/题型/顺序配置');
+ok((pset.match(/unit-row/g)||[]).length===1+pos0.b.length+pos0.c.length, '刷题范围单元行数=A类合集+B类组+C类组');
+
+// 9) 刷题列表抽取与章节顺序
+const plist = buildPracticeList();
+ok(plist.length>0, '默认范围能抽出题目');
+const stB = __h.st(); stB.porder='seq';
+const seqP = buildPracticeList();
+ok(seqP.length===plist.length && seqP.every((v,i)=>i===0||qAt(seqP[i]).ch>=qAt(seqP[i-1]).ch), '按章节顺序时题目按章节号递增');
+
+// 10) 答错入错题本、错误次数只增不减
+__h.resetPw();
+const qw = seqP[0];
+recordWrong(0, qw, false);
+ok(__h.pw()[0][qw] && __h.pw()[0][qw].fails===1, '答错一次记录错误次数 1');
+recordWrong(0, qw, false);
+ok(__h.pw()[0][qw].fails===2 && __h.pw()[0][qw].streak===0, '再答错次数累加为 2、连对计数清零');
+
+// 10.5) 错题记录保存当时作答 ua；答对不覆盖
+__h.resetPw();
+const qu = seqP[0], q2u = seqP[1];
+recordWrong(0, qu, false, ['A','C']);
+ok(Array.isArray(__h.pw()[0][qu].ua) && __h.pw()[0][qu].ua.join('')==='AC', '答错记录保存 ua=[A,C]');
+recordWrong(0, qu, false, ['B']);
+ok(__h.pw()[0][qu].ua.join('')==='B', '再次答错时 ua 更新为最近一次');
+recordWrong(0, qu, true);
+ok(__h.pw()[0][qu].ua.join('')==='B', '答对（streak 路径）不覆盖 ua');
+recordWrong(0, q2u, false);
+ok(!('ua' in __h.pw()[0][q2u]), '不传 ua 时记录无 ua 字段（旧格式兼容）');
+
+// 11) 答对不减次数、连对 3 次移入已掌握
+__h.resetPw();                                            // 自建状态（10.5 段的 resetPw 已清空上文）
+recordWrong(0, qw, false); recordWrong(0, qw, false);     // 先答错两次，恢复第 10 段末状态
+recordWrong(0, qw, true);
+ok(__h.pw()[0][qw].fails===2 && __h.pw()[0][qw].streak===1 && !__h.pw()[0][qw].mastered, '答对一次错误次数不变、连对 +1');
+recordWrong(0, qw, true); recordWrong(0, qw, true);
+const rw = __h.pw()[0][qw];
+ok(rw.fails===2 && rw.mastered===true, '连对 3 次后移入已掌握、历史错次保留');
+
+// 12) 强化练习只抽高频错题、重刷全部含全部待复习
+__h.resetPw();
+const qa2 = seqP.find(qi=>qAt(qi).t===0), qj2 = seqP.find(qi=>qAt(qi).t===2);
+recordWrong(0, qa2, false);                       // 错 1 次 -> 普通
+recordWrong(0, qj2, false); recordWrong(0, qj2, false);  // 错 2 次 -> 高频
+startWrong(true);
+ok(__h.practice() && __h.practice().list.length===1 && __h.practice().list[0]===qj2, '强化练习仅含高频（≥2次）错题');
+startWrong(false);
+const allWrong = __h.practice().list;
+ok(allWrong.length===2 && allWrong.includes(qa2) && allWrong.includes(qj2), '重刷全部含所有待复习错题');
+
+// 13) 错题本页面统计与动作
+const wpage = vWrong();
+ok(wpage.includes('待复习') && wpage.includes('已掌握') && wpage.includes('累计记录'), '错题本页含待复习/已掌握/累计记录统计卡');
+ok(wpage.includes('强化练习') && wpage.includes('重刷全部'), '错题本页含强化练习与重刷全部入口');
+reviveWrong(qa2); reviveWrong(qj2);
+ok(__h.pw()[0][qa2].mastered===false && __h.pw()[0][qa2].fails===1 && __h.pw()[0][qa2].streak===0, '拉回后回到待复习、错次保留');
+__h.resetPw();
+const stC = __h.st(); stC.porder=undefined; save();
+
+// 13.5) 错题本详情渲染完整选项（含 ua 高亮与旧记录兼容）
+__h.resetPw();
+const qd = seqP.find(qi=>qAt(qi).t===0);          // 单选题
+recordWrong(0, qd, false, ['A']);
+let det = reviewPractice(__h.pw()[0][qd]);
+ok((det.match(/rv-opt r/g)||[]).length===1, '详情恰有一个正确项高亮');
+ok(det.includes('rv-opt w') && det.includes('>A<'), '错选项 A 标红');
+ok(det.includes(esc(qAt(qd).o[1])) || qAt(qd).o.every((t,i)=>det.includes(esc(t))||i===0), '详情含选项正文');
+const qdOld = seqP.find(qi=>qAt(qi).t===0 && qi!==qd);
+recordWrong(0, qdOld, false);                      // 旧格式：无 ua
+det = reviewPractice(__h.pw()[0][qdOld]);
+ok((det.match(/rv-opt r/g)||[]).length===1 && !det.includes('rv-opt w'), '旧记录只高亮正确项、无错选标记');
+const qdj = seqP.find(qi=>qAt(qi).t===2);          // 判断题
+recordWrong(0, qdj, false, [qAt(qdj).a==='对'?'错':'对']);
+det = reviewPractice(__h.pw()[0][qdj]);
+ok(det.includes('对') && det.includes('错') && det.includes('rv-opt w'), '判断题详情含对/错两项与错选标记');
+// 模拟生产路径：recordWrong 存入带 ua 的记录后，经 vWrong() 的 recs 白名单渲染详情
+__h.resetPw();
+const stD = __h.st(); stD.pos=0; save();
+recordWrong(0, qd, false, ['A']);
+const wpageUa = vWrong();
+ok(wpageUa.includes('rv-opt w'), '生产路径 vWrong() 详情含错选标红（recs 透传 ua）');
+__h.resetPw();
+recordWrong(0, qdOld, false);                      // 旧格式：无 ua
+let wpageOld;
+try { wpageOld = vWrong(); } catch(e) { wpageOld=''; }
+ok(wpageOld && !wpageOld.includes('rv-opt w'), '生产路径旧记录（无 ua）不错选标红且 vWrong() 不报错');
+__h.resetPw();
+
+// 14) 记录可序列化回文件（跟随文件走）
+__h.resetPw();
+recordWrong(0, qa2, false); recordWrong(0, qa2, false);
+const recHtml = recHTML();
+ok(recHtml.indexOf('"fails":2')>=0, 'recHTML 产物包含最新记录（可写回文件本体）');
+ok(document.getElementById('bankRec').textContent.indexOf('fails')>=0, '文件内嵌记录区已更新');
+ok(recHtml.startsWith('<!DOCTYPE html>'), '写回产物保持完整 HTML 结构');
+
+// 15) 清空全部记录
+recordWrong(0, qa2, false);
+clearRec();
+ok(!__h.pw()[0] && Object.keys(__h.pw()).length===0, '清空记录后全部岗位记录清零');
+ok(localStorage.getItem('exam_tool_practice_v1')==='{}', '清空后备份同步为空');
+
+// 16) 自动保存句柄身份校验（防复制副本/换版本误写旧文件）
+const fid = __h.fileId();
+ok(fid && fid.length>=16, '文件构建指纹已注入');
+ok(recMetaOK({id:fid, name:'模拟考试工具.html'}, '模拟考试工具.html'), '同文件（指纹+文件名一致）校验通过');
+ok(!recMetaOK({id:fid, name:'模拟考试工具 - 副本.html'}, '模拟考试工具.html'), '文件名不一致（复制副本）校验拒绝');
+ok(!recMetaOK({id:'deadbeef', name:'模拟考试工具.html'}, '模拟考试工具.html'), '构建指纹不一致（换版本）校验拒绝');
+ok(!recMetaOK(null, '模拟考试工具.html'), '无元数据（旧版本）校验拒绝');
+
+// 17) 待恢复/已开启状态提示（已开启不含「立即保存」，待恢复含恢复入口）
+__h.setPending({name:'模拟考试工具.html'});
+const pendBar = recBarHTML();
+ok(pendBar.includes('恢复自动保存') && pendBar.includes('重新选择文件'), '待恢复态含「恢复自动保存」与「重新选择文件」');
+__h.setPending(null);
+__h.setHandle({name:'模拟考试工具.html'});
+const onBar = recBarHTML();
+ok(onBar.includes('自动保存已开启') && !onBar.includes('立即保存'), '已开启态显示自动保存状态、不再显示「立即保存」');
+__h.setHandle(null);
+__h.setPending(null);
+
+// 18) 恢复自动保存前的记录一致性检查（防复制副本误写旧文件）
+(async()=>{
+const mkHandle = rec => ({kind:'file', name:'模拟考试工具.html',
+  getFile: async ()=>({ text: async ()=>`<html><script id="bankRec" type="application/json">${rec}</script></html>` }),
+  queryPermission: async ()=>'granted', requestPermission: async ()=>'granted'});
+__h.setHandle(null);
+// 记录不一致 -> 拦截，引导重新选择（不恢复）
+__h.setPending(mkHandle('{"0":{"q":{"fails":9}}}'));
+await resumeRecSave();
+ok(!__h.recHandle(), '记录不一致时拒绝恢复（拦截误写旧文件）');
+ok(!__h.pw()[0], '拦截后不产生错误记录');
+// 记录一致 -> 正常恢复（recSnap 为页面打开时的记录快照，桩初始为 '{}'）
+__h.setPending(mkHandle('{}'));
+await resumeRecSave();
+ok(__h.recHandle() && __h.recHandle().kind==='file', '记录一致时正常恢复自动保存');
+__h.setHandle(null); __h.setPending(null);
+
+console.log(fails? `\n存在 ${fails} 个 FAIL`:'\n全部 PASS');
+process.exit(fails?1:0);
+})();
