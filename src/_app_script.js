@@ -46,9 +46,8 @@ function themePref(){
   try{ const v = localStorage.getItem(THEME_KEY);
     return (v==='light'||v==='dark') ? v : 'auto'; }catch(e){ return 'auto'; }
 }
-function themeLabel(p){
-  return {auto:'主题：跟随系统', light:'主题：浅色', dark:'主题：深色'}[p] || '主题：跟随系统';
-}
+const THEME_ICON = {auto:'◐', light:'☀', dark:'☾'};
+const THEME_NAME = {auto:'跟随系统', light:'浅色', dark:'深色'};
 function applyTheme(){
   const p = themePref();
   let t = p;
@@ -59,12 +58,57 @@ function applyTheme(){
   }
   document.documentElement.setAttribute('data-theme', t);
 }
-function cycleTheme(){
-  const next = {auto:'light', light:'dark', dark:'auto'}[themePref()] || 'auto';
-  try{ localStorage.setItem(THEME_KEY, next); }catch(e){}
-  applyTheme();
-  const btn = document.getElementById('themeBtn');
-  if(btn) btn.innerHTML = themeLabel(next);
+// 全局右上角主题按钮 + 三选一菜单（所有页面可用，不再占首页 tab 位）
+function themeFabInit(){
+  if(document.getElementById('themeFab')) return;
+  document.body.insertAdjacentHTML('beforeend',
+    `<button class="theme-fab" id="themeFab" title="主题设置" onclick="toggleThemeMenu(event)">${THEME_ICON[themePref()]}</button>`
+    + `<div class="theme-menu" id="themeMenu">`
+    + ['auto','light','dark'].map(p=>
+      `<button data-t="${p}" onclick="setTheme('${p}')"><span class="ck">${p===themePref()?'✓':''}</span>${THEME_NAME[p]}</button>`).join('')
+    + `</div>`);
+  document.addEventListener('click', e=>{
+    const m = document.getElementById('themeMenu');
+    if(m && m.classList.contains('open') && !(e.target.closest && (e.target.closest('#themeMenu')||e.target.closest('#themeFab'))))
+      m.classList.remove('open');
+  });
+}
+function themeFabSync(){
+  const f = document.getElementById('themeFab');
+  if(f) f.textContent = THEME_ICON[themePref()];
+  document.querySelectorAll('#themeMenu button').forEach(b=>{
+    const on = b.dataset.t===themePref();
+    b.classList.toggle('on', on);
+    const ck = b.querySelector('.ck'); if(ck) ck.textContent = on?'✓':'';
+  });
+}
+function toggleThemeMenu(e){
+  if(e && e.stopPropagation) e.stopPropagation();
+  const m = document.getElementById('themeMenu');
+  if(m) m.classList.toggle('open');
+}
+function setTheme(p){
+  try{ localStorage.setItem(THEME_KEY, p); }catch(e){}
+  applyTheme(); themeFabSync();
+  const m = document.getElementById('themeMenu');
+  if(m) m.classList.remove('open');
+}
+
+/* ---- 答题偏好（选后自动下一题），存 localStorage ---- */
+const PREFS_KEY = 'exam_tool_prefs_v1';
+let prefs = (()=>{
+  try{
+    const p = JSON.parse(localStorage.getItem(PREFS_KEY));
+    if(p && typeof p==='object')
+      return { autoNextExam: p.autoNextExam!==false, autoNextPractice: p.autoNextPractice===true };
+  }catch(e){}
+  return { autoNextExam:true, autoNextPractice:false };   // 考试默认开、刷题默认关（刷题要看解析）
+})();
+function savePrefs(){ try{ localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); }catch(e){} }
+function toggleAutoNext(kind){
+  prefs[kind] = !prefs[kind]; savePrefs();
+  const el = document.getElementById(kind==='autoNextExam'?'anExam':'anPractice');
+  if(el) el.checked = prefs[kind];
 }
 
 /* ---- 写回本文件（File System Access API，Chromium 专属） ---- */
@@ -275,7 +319,6 @@ function setMode(m){ st.mode=m; save(); render(); }
 function vHome(){
   const tabs = [['exam','模拟考试'],['practice','刷题练习'],['wrong','错题本']].map(t=>
     `<button class="top-tab ${st.mode===t[0]?'on':''}" onclick="setMode('${t[0]}')">${t[1]}</button>`).join('')
-    + `<button class="top-tab" id="themeBtn" onclick="cycleTheme()">${themeLabel(themePref())}</button>`
     + `<button class="top-tab tab-far" onclick="paperEnter()">生成试卷</button><button class="top-tab" onclick="dzEnter()">抽签</button>`;
   const title = {exam:'请选择考试岗位', practice:'选择岗位 · 刷题练习', wrong:'选择岗位 · 错题本'}[st.mode];
   let cards;
@@ -584,12 +627,16 @@ function vExamRun(){
   <div class="exam-topbar">
     <button class="btn ghost" onclick="exitExam()">← 返回岗位选择</button>
     <div class="et-info">
+      <label class="an-sw" title="选中答案后自动跳到下一题"><input type="checkbox" id="anExam" ${prefs.autoNextExam?'checked':''} onchange="toggleAutoNext('autoNextExam')">自动下一题</label>
+      <span class="kbd-hint">A–H 作答 · ←→ 翻题 · M 标记</span>
       <span class="exam-timer" id="examTimer">00:00:00</span>
       <span class="exam-pos">第 <b class="num">1</b> / 80 题</span>
       <span class="exam-done">已答 <b class="num">0</b> · 未答 <b class="num">80</b> · 标记 <b class="num">0</b></span>
     </div>
   </div>
   <div id="examBox"></div>
+  <button class="qnav prev" id="qnavPrev" onclick="prevExam()" aria-label="上一题">‹</button>
+  <button class="qnav next" id="qnavNext" onclick="nextExam()" aria-label="下一题">›</button>
   <div class="card exam-navcard">
     <div class="exam-legend">
       <span><i class="lg-done"></i>已答</span>
@@ -613,7 +660,13 @@ function drawExam(){
     sel:exam.ans[qi]||[], chapName:BANK.chapters[q.ch], exam:true});
   document.getElementById('examNav').innerHTML = exam.paper.map((qj,i)=>navBtn(i)).join('');
   updateExamHead(); syncTimer(); drawStatCard();
+  syncQnav(exam.cur<=0, exam.cur>=exam.paper.length-1);
   bindGlobal();
+}
+function syncQnav(noPrev, noNext){
+  const pv=document.getElementById('qnavPrev'), nx=document.getElementById('qnavNext');
+  if(pv) pv.disabled = !!noPrev;
+  if(nx) nx.disabled = !!noNext;
 }
 function statCardHTML(){
   const pos = BANK.positions[st.pos];
@@ -696,6 +749,11 @@ function toggleExamSelect(qi, el){
     : [card.querySelector('.opt.sel')?.dataset.key].filter(Boolean);
   if(sel.length) exam.ans[qi]=sel; else delete exam.ans[qi];
   updateExamHead(); drawExamNav();
+  // 单选/判断选中后自动跳下一题（300ms 留时间看到选中态；多选需自行确认，不自动跳）
+  if(q.t!==1 && sel.length && prefs.autoNextExam && exam.cur<exam.paper.length-1){
+    const my = exam.cur;
+    setTimeout(()=>{ if(exam && !exam.done && view==='exam' && exam.cur===my) nextExam(); }, 300);
+  }
 }
 function drawExamNav(){
   const nav=document.getElementById('examNav');
@@ -888,11 +946,15 @@ function vPractice(){
   <div class="exam-topbar">
     <button class="btn ghost" onclick="exitPractice()">← 返回</button>
     <div class="et-info">
+      <label class="an-sw" title="答对后自动跳到下一题；答错仍停留看解析"><input type="checkbox" id="anPractice" ${prefs.autoNextPractice?'checked':''} onchange="toggleAutoNext('autoNextPractice')">自动下一题</label>
+      <span class="kbd-hint">A–H 作答 · ←→ 翻题 · Enter 确认</span>
       <span class="exam-pos">第 <b class="num">1</b> / ${practice.list.length} 题</span>
       <span class="exam-done">已答 <b class="num">0</b> · 未答 <b class="num">${practice.list.length}</b></span>
     </div>
   </div>
   <div id="practiceBox"></div>
+  <button class="qnav prev" id="qnavPrev" onclick="prevPractice()" aria-label="上一题">‹</button>
+  <button class="qnav next" id="qnavNext" onclick="nextPractice()" aria-label="下一题">›</button>
   <div class="card exam-navcard">
     <div class="exam-legend">
       <span><i class="lg-done"></i>答对</span>
@@ -971,6 +1033,7 @@ function drawPractice(){
     instant:true, st:stt, chapName:BANK.chapters[q.ch]});
   document.getElementById('practiceNav').innerHTML = practice.list.map((_,j)=>pNavBtn(j)).join('');
   updatePracticeHead();
+  syncQnav(practice.cur<=0, practice.cur>=practice.list.length-1);
   bindGlobal();
 }
 function pNavBtn(i){
@@ -1007,6 +1070,12 @@ function lockPractice(qi, ua){
   practice.st[qi] = {ua, ok};
   recordWrong(st.pos, qi, ok, ua);
   updatePracticeHead(); drawPractice();
+  syncQnav(practice.cur<=0, practice.cur>=practice.list.length-1);
+  // 答对且开启自动跳：停留 900ms 看到反馈后跳下一题；答错始终停留看解析
+  if(ok && prefs.autoNextPractice && practice.cur<practice.list.length-1){
+    const my = practice.cur;
+    setTimeout(()=>{ if(practice && !practice.done && view==='practice' && practice.cur===my) nextPractice(); }, 900);
+  }
 }
 function prevPractice(){ if(!practice||practice.done)return; if(practice.cur>0){practice.cur--;drawPractice();} }
 function nextPractice(){ if(!practice||practice.done)return; if(practice.cur<practice.list.length-1){practice.cur++;drawPractice();} }
@@ -2331,8 +2400,44 @@ function vPaperDone(){
   </div>`;
 }
 
+/* ---- 键盘快捷键：仅考试/刷题进行中生效；焦点在输入控件时让位 ---- */
+document.addEventListener('keydown', e=>{
+  if(e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target;
+  if(t && (t.tagName==='INPUT' || t.tagName==='TEXTAREA' || t.tagName==='SELECT' || t.isContentEditable)) return;
+  const inExam = view==='exam' && exam && !exam.done;
+  const inPrac = view==='practice' && practice && !practice.done;
+  if(!inExam && !inPrac) return;
+  const k = e.key;
+  if(k==='ArrowLeft'){ e.preventDefault(); inExam ? prevExam() : prevPractice(); return; }
+  if(k==='ArrowRight'){ e.preventDefault(); inExam ? nextExam() : nextPractice(); return; }
+  if(k==='Enter'){
+    e.preventDefault();
+    if(inExam){
+      if(exam.cur>=exam.paper.length-1) submitExam(); else nextExam();
+    } else {
+      const qi = practice.list[practice.cur], q = qAt(qi);
+      if(!practice.st[qi]){ if(q.t===1) practiceConfirm(qi); }
+      else if(practice.cur<practice.list.length-1) nextPractice();
+    }
+    return;
+  }
+  if(inExam && (k==='m' || k==='M')){ toggleMark(); return; }
+  let idx = -1;
+  if(/^[a-hA-H]$/.test(k)) idx = k.toUpperCase().charCodeAt(0)-65;
+  else if(/^[1-8]$/.test(k)) idx = +k-1;
+  if(idx<0) return;
+  const card = document.querySelector('.q-card');
+  if(!card) return;
+  const opts = card.querySelectorAll('.opt');
+  if(idx>=opts.length) return;
+  if(inPrac && practice.st[+card.dataset.qi]) return;   // 已作答锁定，不再改
+  onOptClick(opts[idx]);
+});
+
 // 主题初始化：按偏好上主题色；auto 态注册系统偏好变化监听（注册前判存在，回调内再校验偏好）
 applyTheme();
+themeFabInit();
 try{
   if(window.matchMedia){
     const mq = window.matchMedia('(prefers-color-scheme: light)');

@@ -225,6 +225,38 @@ main.wide{max-width:1280px}
 .q-foot{display:flex;gap:12px;margin-top:22px;flex-wrap:wrap;align-items:center}
 .q-foot-spacer{flex:1}
 
+/* 全局主题按钮（右上角固定） + 三选一菜单 */
+.theme-fab{position:fixed;top:14px;right:16px;z-index:90;width:40px;height:40px;border-radius:50%;
+  border:1px solid var(--line2);background:var(--recbar);color:var(--gold-hi);font-size:17px;
+  display:grid;place-items:center;backdrop-filter:blur(10px);
+  box-shadow:0 10px 26px -12px rgba(0,0,0,.7);transition:.2s}
+.theme-fab:hover{transform:translateY(-2px);border-color:var(--gold)}
+.theme-menu{position:fixed;top:62px;right:16px;z-index:91;min-width:138px;padding:6px;border-radius:13px;
+  background:var(--recbar);border:1px solid var(--line2);backdrop-filter:blur(12px);
+  box-shadow:var(--shadow);display:none}
+.theme-menu.open{display:block;animation:rise .25s}
+.theme-menu button{display:flex;align-items:center;gap:9px;width:100%;padding:9px 12px;border-radius:9px;
+  font-size:13px;color:var(--ink);text-align:left;transition:.15s}
+.theme-menu button:hover{background:rgba(216,167,92,.1)}
+.theme-menu button.on{color:var(--gold-hi);font-weight:700}
+.theme-menu button .ck{width:14px;color:var(--gold);font-weight:800}
+
+/* 题目两侧悬浮翻题箭头 */
+.qnav{position:fixed;top:50%;transform:translateY(-50%);z-index:40;width:46px;height:46px;border-radius:50%;
+  border:1px solid var(--line2);background:var(--recbar);color:var(--gold-hi);font-size:22px;line-height:1;
+  display:grid;place-items:center;backdrop-filter:blur(8px);
+  box-shadow:0 10px 26px -12px rgba(0,0,0,.7);transition:.2s}
+.qnav:hover{border-color:var(--gold);background:rgba(216,167,92,.14)}
+.qnav.prev{left:max(10px, calc(50% - 706px))}
+.qnav.next{right:max(10px, calc(50% - 706px))}
+.qnav:disabled{opacity:.22;cursor:default}
+.qnav:disabled:hover{border-color:var(--line2);background:var(--recbar)}
+
+/* 顶栏自动下一题开关 + 快捷键提示 */
+.an-sw{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;user-select:none;white-space:nowrap}
+.an-sw input{accent-color:var(--gold);width:15px;height:15px;cursor:pointer;margin:0}
+.kbd-hint{font-size:11px;color:var(--faint);letter-spacing:.5px;white-space:nowrap}
+
 .bar-row{display:flex;align-items:center;gap:12px;margin:12px 0}
 .bar-row .b-name{flex:none;width:78px;font-size:13px;color:var(--muted);text-align:right}
 .bar-row .b-track{flex:1;height:10px;border-radius:99px;background:var(--w6);overflow:hidden;box-shadow:inset 0 1px 2px rgba(0,0,0,.4)}
@@ -299,7 +331,7 @@ main.wide{max-width:1280px}
 .exam-done{font-size:12.5px;color:var(--muted)}
 .exam-done b{color:var(--gold-hi);font-family:var(--f-num)}
 .exam-statcard{margin-top:16px}
-.exam-topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:10px 0;background:linear-gradient(180deg,var(--bg0) 78%,transparent)}
+.exam-topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:12px;margin-bottom:14px;padding:10px 52px 10px 0;background:linear-gradient(180deg,var(--bg0) 78%,transparent)}
 .et-info{margin-left:auto;display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .exam-navcard{padding:16px 18px;margin-top:16px}
 .exam-legend{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:4px;font-size:11.5px;color:var(--muted)}
@@ -344,7 +376,7 @@ main.wide{max-width:1280px}
 .rv-note{margin-top:10px;padding:11px 14px;border-radius:11px;background:rgba(216,167,92,.07);border:1px solid rgba(226,186,116,.22);font-size:13px;color:var(--ink);line-height:1.75;white-space:pre-wrap}
 
 /* 首页导航标签 */
-.top-tabs{display:flex;gap:10px;margin:4px 0 20px;flex-wrap:wrap}
+.top-tabs{display:flex;gap:10px;margin:4px 0 20px;flex-wrap:wrap;padding-right:52px}
 .top-tab{padding:10px 20px;border-radius:12px;border:1px solid var(--line);color:var(--muted);font-size:14px;font-weight:700;letter-spacing:2px;transition:.2s;display:flex;align-items:center;gap:8px}
 .top-tab:hover{border-color:var(--line2);color:var(--gold-hi)}
 .top-tab.on{color:#241708;background:linear-gradient(140deg,#f5e3b8,#c8933f);border-color:transparent;box-shadow:0 10px 24px -10px rgba(216,167,92,.55)}
@@ -456,6 +488,12 @@ footer div{margin:2px 0}
   .dz-lab{width:auto}
   .dz-meta{margin-left:0}
   .tab-far{margin-left:0}
+  .kbd-hint{display:none}
+  .qnav{width:36px;height:36px;font-size:17px}
+  .qnav.prev{left:6px}
+  .qnav.next{right:6px}
+  .q-foot{position:sticky;bottom:0;z-index:20;padding:12px 0 4px;
+    background:linear-gradient(180deg,transparent,var(--bg1) 45%)}
 }
 </style>
 </head>

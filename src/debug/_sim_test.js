@@ -22,12 +22,13 @@ const fakeEl = () => {
   };
 };
 global.document = {
-  _els:{},
+  _els:{}, _handlers:{},
   getElementById(id){ if(!this._els[id]) this._els[id]=fakeEl(); return this._els[id]; },
   createElement(){ return fakeEl(); },
-  body:{ appendChild(){} },
+  body:{ appendChild(){}, insertAdjacentHTML(){} },
   querySelector(){ return fakeEl(); },
   querySelectorAll(){ return []; },
+  addEventListener(t,c){ this._handlers[t]=c; },
 };
 // documentElement.outerHTML 动态反映 #bankRec 记录区内容（模拟真实 DOM 序列化）
 const docEl = fakeEl();
@@ -46,7 +47,9 @@ global.matchMedia = global.window.matchMedia;
 global.requestAnimationFrame = cb => cb();
 global.cancelAnimationFrame = () => {};
 
-eval(script + '\n;globalThis.__h={bank:()=>BANK, exam:()=>exam, st:()=>st, view:()=>view, setExam:v=>{exam=v;}, pw:()=>pw, resetPw:()=>{pw={};}, practice:()=>practice, fileId:()=>FILE_ID, setPending:v=>{recPending=v;}, getPending:()=>recPending, recHandle:()=>recHandle, setHandle:v=>{recHandle=v;}, snap:()=>recSnap, themePref:()=>themePref(), cycleTheme:()=>cycleTheme(), themeBtnHTML:()=>vHome(), setConfirm:v=>{confirmResult=v;}};');
+// 预置偏好为关，避免自动跳题定时器干扰既有断言；自动跳在专节里显式开启再测
+localStorage.setItem('exam_tool_prefs_v1', JSON.stringify({autoNextExam:false, autoNextPractice:false}));
+eval(script + '\n;globalThis.__h={bank:()=>BANK, exam:()=>exam, st:()=>st, view:()=>view, setExam:v=>{exam=v;}, pw:()=>pw, resetPw:()=>{pw={};}, practice:()=>practice, setPractice:v=>{practice=v;}, fileId:()=>FILE_ID, setPending:v=>{recPending=v;}, getPending:()=>recPending, recHandle:()=>recHandle, setHandle:v=>{recHandle=v;}, snap:()=>recSnap, themePref:()=>themePref(), setTheme:v=>setTheme(v), prefs:()=>prefs, toggleAutoNext:k=>toggleAutoNext(k), key:(k,tg)=>document._handlers.keydown({key:k,target:tg||{},preventDefault(){}}), setConfirm:v=>{confirmResult=v;}};');
 
 let fails = 0;
 const ok = (cond,msg)=>{ console.log(`  [${cond?'PASS':'FAIL'}] ${msg}`); if(!cond) fails++; };
@@ -433,11 +436,79 @@ ok(themePref()==='auto', '非法存储值按 auto 处理');
 ok(document.documentElement.getAttribute('data-theme')!=='light', 'auto+深色系统偏好 → 非 light');
 global.matchMediaResult.matches = true; applyTheme();
 ok(document.documentElement.getAttribute('data-theme')==='light', 'auto 跟随系统浅色');
-cycleTheme(); ok(themePref()==='light' && localStorage.getItem('exam_tool_theme_v1')==='light', '循环到 light 并持久化');
-cycleTheme(); ok(themePref()==='dark', '循环到 dark');
-cycleTheme(); ok(themePref()==='auto', '循环回 auto');
-ok(vHome().includes('themeBtn') && vHome().includes('cycleTheme()'), '首页含主题切换按钮');
-ok(vHome().includes('跟随系统')||vHome().includes('主题：'), '按钮文案为日常说法');
+__h.setTheme('light'); ok(themePref()==='light' && localStorage.getItem('exam_tool_theme_v1')==='light', 'setTheme 切浅色并持久化');
+__h.setTheme('dark'); ok(themePref()==='dark', 'setTheme 切深色');
+__h.setTheme('auto'); ok(themePref()==='auto', 'setTheme 回跟随系统');
+ok(!vHome().includes('themeBtn') && !vHome().includes('cycleTheme'), '首页 tab 不再含主题按钮（已移全局右上角）');
+ok(script.includes('themeFabInit()') && script.includes('theme-fab') && script.includes('theme-menu'), '全局主题按钮与三选一菜单已挂载');
+
+// 20) 答题偏好（选后自动下一题）
+ok(script.includes('autoNextExam:true') && script.includes('autoNextPractice:false'), '自动下一题默认口径：考试开、刷题关（代码默认值）');
+ok(__h.prefs().autoNextExam===false && __h.prefs().autoNextPractice===false, '测试预置偏好生效（关）');
+__h.toggleAutoNext('autoNextPractice');
+ok(__h.prefs().autoNextPractice===true && JSON.parse(localStorage.getItem('exam_tool_prefs_v1')).autoNextPractice===true, '开关切换并持久化到 localStorage');
+__h.toggleAutoNext('autoNextPractice');
+const run2 = vExamRun();
+ok(run2.includes('anExam') && run2.includes('qnavPrev') && run2.includes('qnavNext') && run2.includes('kbd-hint'), '考试页含自动下一题开关/悬浮箭头/快捷键提示');
+
+// 21) 键盘快捷键（考试）
+let exK; do{ exK = mkExam(); }while(BANK.q[exK.paper[0]].t===1);
+__h.setExam(exK); go('exam');
+const kq0 = exK.paper[0];
+__h.key('ArrowRight'); ok(__h.exam().cur===1, '→ 下一题');
+__h.key('ArrowLeft'); ok(__h.exam().cur===0, '← 上一题');
+__h.key('m'); ok(!!__h.exam().mark[kq0], 'M 标记当前题');
+__h.key('M'); ok(!__h.exam().mark[kq0], 'M 再按取消标记');
+const kOptA = fakeEl(); kOptA.dataset.qi=String(kq0); kOptA.dataset.key='A';
+const kOptB = fakeEl(); kOptB.dataset.qi=String(kq0); kOptB.dataset.key='B';
+const kCard = fakeEl(); kCard.dataset.qi=String(kq0);
+kCard.querySelectorAll = ()=>[kOptA,kOptB];
+kCard.querySelector = sel => sel==='.opt.sel' ? ([kOptA,kOptB].find(o=>o._cls.has('sel'))||null) : null;
+kOptA.closest = sel => sel==='.opt' ? kOptA : (sel==='.q-card' ? kCard : null);
+kOptB.closest = sel => sel==='.opt' ? kOptB : (sel==='.q-card' ? kCard : null);
+const origQS = document.querySelector.bind(document);
+document.querySelector = sel => sel==='.q-card' ? kCard : origQS(sel);
+__h.key('b');
+ok(__h.exam().ans[kq0] && __h.exam().ans[kq0][0]==='B', '字母键 B 直接作答');
+document.querySelector = origQS;
+__h.key('Enter'); ok(__h.exam().cur===1, 'Enter 跳下一题（非末题）');
+__h.exam().cur = __h.exam().paper.length-1;
+__h.key('Enter'); ok(__h.exam().done===true, '末题 Enter 交卷');
+
+// 22) 考试自动跳下一题（开启后）
+let exA; do{ exA = mkExam(); }while(BANK.q[exA.paper[0]].t===1);
+__h.setExam(exA); __h.exam().cur = 0; go('exam');
+__h.toggleAutoNext('autoNextExam');
+const aq0 = exA.paper[0];
+const aOpt = fakeEl(); aOpt.dataset.qi=String(aq0); aOpt.dataset.key='A';
+const aCard = fakeEl(); aCard.dataset.qi=String(aq0);
+aCard.querySelectorAll = ()=>[aOpt];
+aCard.querySelector = sel => sel==='.opt.sel' ? (aOpt._cls.has('sel')?aOpt:null) : null;
+aOpt.closest = sel => sel==='.opt' ? aOpt : (sel==='.q-card' ? aCard : null);
+(appEl._ls['click']||[]).forEach(cb=>cb({target:aOpt}));
+ok(__h.exam().ans[aq0] && __h.exam().cur===0, '选中后未立即跳（300ms 延迟）');
+await new Promise(r=>setTimeout(r,400));
+ok(__h.exam().cur===1, '300ms 后自动跳到下一题');
+__h.toggleAutoNext('autoNextExam');
+
+// 23) 刷题：自动跳默认关、答对才跳、界面元素齐全
+const pList=[]; for(let i=0;i<BANK.q.length && pList.length<3;i++) if(BANK.q[i].t!==1) pList.push(i);
+__h.setPractice({list:pList, cur:0, st:{}, done:false, src:'normal'}); go('practice');
+const pRunHtml = vPractice();
+ok(pRunHtml.includes('anPractice') && pRunHtml.includes('qnavPrev') && pRunHtml.includes('Enter 确认'), '刷题页含自动下一题开关/悬浮箭头/快捷键提示');
+__h.key('ArrowRight'); ok(__h.practice().cur===1, '刷题 → 下一题');
+__h.key('ArrowLeft'); ok(__h.practice().cur===0, '刷题 ← 上一题');
+const pq0 = pList[0];
+lockPractice(pq0, [BANK.q[pq0].a]);
+await new Promise(r=>setTimeout(r,1000));
+ok(__h.practice().cur===0, '偏好关时答对也不自动跳');
+__h.toggleAutoNext('autoNextPractice');
+__h.setPractice({list:pList, cur:0, st:{}, done:false, src:'normal'}); go('practice');
+lockPractice(pq0, [BANK.q[pq0].a]);
+await new Promise(r=>setTimeout(r,1000));
+ok(__h.practice().cur===1, '偏好开时答对自动跳下一题');
+__h.toggleAutoNext('autoNextPractice');
+__h.setPractice(null); go('home');
 
 console.log(fails? `\n存在 ${fails} 个 FAIL`:'\n全部 PASS');
 process.exit(fails?1:0);
